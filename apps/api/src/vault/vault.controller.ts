@@ -1,5 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { User } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { AuthGuard } from '../auth/guards/auth.guard.js';
@@ -13,7 +23,7 @@ import { VaultService } from './vault.service.js';
 @UseGuards(AuthGuard)
 @ApiCookieAuth()
 export class VaultController {
-  constructor(private readonly vaultService: VaultService) {}
+  constructor(@Inject(VaultService) private readonly vaultService: VaultService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -51,6 +61,7 @@ export class VaultController {
   }
 
   @Post('rotate-passphrase')
+  @Throttle({ recovery: { limit: 5, ttl: 300000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Rotate Vault Passphrase',
@@ -68,6 +79,7 @@ export class VaultController {
   }
 
   @Post('recover')
+  @Throttle({ recovery: { limit: 5, ttl: 300000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Recover Vault Access',

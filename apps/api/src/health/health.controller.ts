@@ -1,5 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiOperation, ApiResponse as SwaggerResponse, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { MEMOIR_PROTOCOL_VERSION } from '@memoir/shared';
 import { Redis } from 'ioredis';
 import pg from 'pg';
@@ -17,6 +18,7 @@ interface HealthCheckResult {
 }
 
 @ApiTags('Health')
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(@Inject(AppConfigService) private readonly config: AppConfigService) {}

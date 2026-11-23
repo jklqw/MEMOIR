@@ -19,6 +19,12 @@ async function bootstrap() {
   // Security middlewares (Helmet, strict CSP, HSTS, Permissions-Policy, CORS, Cookies)
   setupSecurityMiddleware(app, config);
 
+  // Trust first proxy (Nginx reverse proxy for accurate client IP resolution)
+  const expressApp = app.getHttpAdapter().getInstance();
+  if (typeof expressApp?.set === 'function') {
+    expressApp.set('trust proxy', 1);
+  }
+
   // Global prefix
   app.setGlobalPrefix('api/v1');
 

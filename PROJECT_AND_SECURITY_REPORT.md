@@ -349,7 +349,8 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - **Opaque Cookie Sessions:** Issued strictly via `HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` (production). Raw session tokens (`memoir_s_...`) are never stored in the database; only SHA-256 hashes are persisted.
 - **Session Rotation & Replay Detection:** On `/api/v1/auth/refresh`, the active session is revoked and replaced with a fresh token in the same `familyId`. If an already-rotated token is replayed, the entire session family is revoked and a `SUSPICIOUS_LOGIN` event is recorded.
 - **Remote Device Revocation:** Active devices can be listed with parsed `deviceLabel` and masked IP addresses (`192.168.1.x`). Sessions can be revoked individually or in bulk (`POST /api/v1/sessions/revoke-all`).
-- **Account Lockout:** 5 consecutive failed login attempts trigger a 15-minute lockout emitting `LOCKOUT_TRIGGERED`.
+- **Account Lockout:** 5 consecutive failed login attempts trigger an exponential lockout duration ($15 \times 2^{\min(\text{attempts}-5, 6)}$ minutes, capped at 24 hours) emitting `LOCKOUT_TRIGGERED`. Successfully authenticating resets `failedLoginAttempts` and clears `lockedUntil`.
+- **Proxy-Aware Rate Limiting:** Backed by Redis with fail-safe in-memory fallback, tracking client IP via `X-Forwarded-For` and `usr:<id>` for authenticated requests. Tiered enforcement: `default` (100 req/min), `auth` (10 req/min), `recovery` (5 req/5min). Health probes exempted via `@SkipThrottle()`. Returns `429 Too Many Requests` with RFC 7231 `Retry-After` header.
 - **Email Verification:** Dispatched via Mailpit SMTP; tokens stored as SHA-256 hashes with 24-hour expiration.
 - **2FA & Passkeys:** Scheduled for Phase 6 (TOTP and WebAuthn Passkeys).
 
@@ -376,22 +377,25 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 
 ## 9. Automated Testing Matrix
 
-| Test Suite / Layer                  | Target Package   | Command                                     | Result          | Date       | Notes                                                                   |
-| :---------------------------------- | :--------------- | :------------------------------------------ | :-------------- | :--------- | :---------------------------------------------------------------------- |
-| **Format Check**                    | Workspace Root   | `pnpm format:check`                         | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                             |
-| **Linting**                         | Workspace Root   | `pnpm lint`                                 | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                        |
-| **Typecheck**                       | All Packages     | `pnpm typecheck`                            | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                               |
-| **Health Check Unit**               | `@memoir/api`    | `pnpm --filter @memoir/api test`            | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                     |
-| **Database Integration**            | `@memoir/api`    | `vitest run test/database.spec.ts`          | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity      |
-| **Auth & Email Verification**       | `@memoir/api`    | `vitest run test/auth-registration.spec.ts` | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification    |
-| **Session Lifecycle & Replay**      | `@memoir/api`    | `vitest run test/auth-sessions.spec.ts`     | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout   |
-| **Session Scoping & IDOR Denial**   | `@memoir/api`    | `vitest run test/sessions.spec.ts`          | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial    |
-| **Cryptographic 13 Invariants**     | `@memoir/crypto` | `pnpm --filter @memoir/crypto test`         | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32   |
-| **Vault Lifecycle & IDOR Denial**   | `@memoir/api`    | `vitest run test/vault.spec.ts`             | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets   |
-| **Browser Vault Store & Auto-Lock** | `@memoir/web`    | `pnpm --filter @memoir/web test`            | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock  |
-| **Encrypted Memories Persistence**  | `@memoir/api`    | `vitest run test/memories.spec.ts`          | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking  |
-| **Memory Client Crypto & Search**   | `@memoir/web`    | `vitest run test/memory-crypto.spec.ts`     | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation |
-| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`           | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s               |
+| Test Suite / Layer                  | Target Package   | Command                                            | Result          | Date       | Notes                                                                    |
+| :---------------------------------- | :--------------- | :------------------------------------------------- | :-------------- | :--------- | :----------------------------------------------------------------------- |
+| **Format Check**                    | Workspace Root   | `pnpm format:check`                                | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                              |
+| **Linting**                         | Workspace Root   | `pnpm lint`                                        | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                         |
+| **Typecheck**                       | All Packages     | `pnpm typecheck`                                   | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                                |
+| **Health Check Unit**               | `@memoir/api`    | `pnpm --filter @memoir/api test`                   | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                      |
+| **Database Integration**            | `@memoir/api`    | `vitest run test/database.spec.ts`                 | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity       |
+| **Auth & Email Verification**       | `@memoir/api`    | `vitest run test/auth-registration.spec.ts`        | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification     |
+| **Session Lifecycle & Replay**      | `@memoir/api`    | `vitest run test/auth-sessions.spec.ts`            | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout    |
+| **Session Scoping & IDOR Denial**   | `@memoir/api`    | `vitest run test/sessions.spec.ts`                 | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial     |
+| **Cryptographic 13 Invariants**     | `@memoir/crypto` | `pnpm --filter @memoir/crypto test`                | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32    |
+| **Vault Lifecycle & IDOR Denial**   | `@memoir/api`    | `vitest run test/vault.spec.ts`                    | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets    |
+| **Browser Vault Store & Auto-Lock** | `@memoir/web`    | `pnpm --filter @memoir/web test`                   | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock   |
+| **Encrypted Memories Persistence**  | `@memoir/api`    | `vitest run test/memories.spec.ts`                 | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking   |
+| **Memory Client Crypto & Search**   | `@memoir/web`    | `vitest run test/memory-crypto.spec.ts`            | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation  |
+| **Security Headers & Helmet**       | `@memoir/api`    | `vitest run test/security-headers.spec.ts`         | PASS (5 tests)  | 2026-11-23 | Verified CSP, HSTS, X-Content-Type-Options, Referrer-Policy, CORS        |
+| **CSRF, DTO Allowlist & XSS**       | `@memoir/api`    | `vitest run test/security-csrf-validation.spec.ts` | PASS (10 tests) | 2026-11-23 | Verified Double-Submit token check, stripped unknown fields, XSS inputs  |
+| **Rate Limiting & Account Lockout** | `@memoir/api`    | `vitest run test/security-ratelimit.spec.ts`       | PASS (6 tests)  | 2026-11-23 | Verified proxy IP isolation, Redis TTL, 5-failure lockout, success reset |
+| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`                  | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s                |
 
 ---
 
@@ -461,7 +465,8 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | `01b7ba2`   | `feat(portability): add encrypted backup export/import and warning-gated plaintext export`            | SHA-256 manifest & warning gate       | Verified            |
 | `5135008`   | `docs(report): append Phase 5 attachments and portability verification to report`                     | Phase 5 milestone verification        | Verified            |
 | `06aeb70`   | `security(headers): enforce strict CSP, HSTS, Helmet headers, and allowlisted CORS`                   | Strict CSP, HSTS, Helmet & CORS       | Verified            |
-| _(current)_ | `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests` | Double-Submit CSRF & DTO allowlist    | Verified            |
+| `c1082c3`   | `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests` | Double-Submit CSRF & DTO allowlist    | Verified            |
+| _(current)_ | `security(ratelimit): enforce proxy-aware Redis rate limiting and exponential account lockout`        | Proxy-Aware Rate Limiting & Lockout   | Verified            |
 
 ---
 
@@ -477,7 +482,7 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
-  - `@memoir/api`: 54 integration tests across 12 test suites passing (100%).
+  - `@memoir/api`: 60 integration tests across 13 test suites passing (100%).
   - `@memoir/web`: 19 frontend tests across 4 test suites passing (100%).
 - Web client builds deterministically with 100% self-hosted typography and zero external CDNs.
 

@@ -14,6 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { CSRF_COOKIE_NAME } from '../common/guards/csrf.guard.js';
 import { AuthService } from './auth.service.js';
@@ -41,6 +42,7 @@ export const CSRF_COOKIE_OPTIONS = {
 };
 
 @ApiTags('Authentication')
+@Throttle({ auth: { limit: 10, ttl: 60000 } })
 @Controller('auth')
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}

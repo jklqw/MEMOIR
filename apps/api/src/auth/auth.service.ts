@@ -197,7 +197,14 @@ export class AuthService {
     if (!isPasswordValid) {
       const failedAttempts = user.failedLoginAttempts + 1;
       const willLock = failedAttempts >= 5;
-      const lockedUntil = willLock ? new Date(Date.now() + 15 * 60 * 1000) : null;
+      let lockedUntil: Date | null = null;
+
+      if (willLock) {
+        // Exponential backoff: 5 attempts = 15m, 6 attempts = 30m, 7 = 60m ... capped at 24h
+        const exponent = Math.min(failedAttempts - 5, 6);
+        const lockoutMinutes = Math.min(15 * Math.pow(2, exponent), 1440);
+        lockedUntil = new Date(Date.now() + lockoutMinutes * 60 * 1000);
+      }
 
       await this.prisma.user.update({
         where: { id: user.id },
@@ -214,7 +221,9 @@ export class AuthService {
             ? SecurityEventType.LOCKOUT_TRIGGERED
             : SecurityEventType.LOGIN_FAILED,
           safeMetadata: {
-            reason: willLock ? 'Exceeded 5 failed login attempts' : 'Invalid password',
+            reason: willLock ? 'Exceeded failed login attempts threshold' : 'Invalid password',
+            failedAttempts,
+            lockedUntil: lockedUntil ? lockedUntil.toISOString() : undefined,
             ipMasked: maskIp(ip),
           },
         },
