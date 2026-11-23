@@ -3,19 +3,20 @@ import { useForm } from 'react-hook-form';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { type LoginDto, LoginSchema } from '@memoir/shared';
-import { AlertCircle, Lock, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Fingerprint, Lock, ShieldCheck } from 'lucide-react';
 import { Button } from '../components/ui/Button.js';
 import { Input } from '../components/ui/Input.js';
 import { useAuth } from '../context/AuthContext.js';
 
 export function LoginPage() {
-  const { login, verify2Fa } = useAuth();
+  const { login, verify2Fa, loginWithPasskey, isPasskeySupported } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [serverError, setServerError] = useState<string | null>(null);
   const [mfaChallenge, setMfaChallenge] = useState<{ token: string } | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [isVerifyingMfa, setIsVerifyingMfa] = useState(false);
+  const [isPasskeyLoggingIn, setIsPasskeyLoggingIn] = useState(false);
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/journal';
 
@@ -65,6 +66,23 @@ export function LoginPage() {
       }
     } finally {
       setIsVerifyingMfa(false);
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    setServerError(null);
+    setIsPasskeyLoggingIn(true);
+    try {
+      await loginWithPasskey();
+      navigate(from, { replace: true });
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setServerError(err.message);
+      } else {
+        setServerError('Passkey authentication failed.');
+      }
+    } finally {
+      setIsPasskeyLoggingIn(false);
     }
   };
 
@@ -213,6 +231,30 @@ export function LoginPage() {
                   {isSubmitting ? 'Authenticating...' : 'Sign In'}
                 </Button>
               </div>
+
+              {isPasskeySupported && (
+                <div className="pt-1">
+                  <div className="relative my-3">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-border" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-surface px-2 text-ink-muted text-[10px]">Or</span>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    className="w-full justify-center text-xs flex items-center gap-2"
+                    disabled={isPasskeyLoggingIn || isSubmitting}
+                    onClick={() => void handlePasskeyLogin()}
+                  >
+                    <Fingerprint className="w-4 h-4 text-accent" strokeWidth={1.5} />
+                    {isPasskeyLoggingIn ? 'Authenticating with Passkey...' : 'Sign in with Passkey'}
+                  </Button>
+                </div>
+              )}
             </form>
           )}
 

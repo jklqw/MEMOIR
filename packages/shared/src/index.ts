@@ -261,6 +261,18 @@ export interface SessionResponse {
 }
 
 /**
+ * Registered Passkey View Response
+ */
+export interface PasskeyResponse {
+  id: string;
+  credentialId: string;
+  deviceName: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  transports: string[];
+}
+
+/**
  * Attachment Metadata Payload (encrypted client-side under FileKey or DEK)
  */
 export interface AttachmentMetadataPayload {

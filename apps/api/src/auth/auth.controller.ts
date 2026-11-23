@@ -2,12 +2,14 @@ import * as crypto from 'node:crypto';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
   HttpStatus,
   Inject,
   Ip,
+  Param,
   Post,
   Req,
   Res,
@@ -22,6 +24,9 @@ import { CurrentUser } from './decorators/current-user.decorator.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
+import { PasskeyLoginOptionsDto } from './dto/passkey-login-options.dto.js';
+import { PasskeyLoginVerifyDto } from './dto/passkey-login-verify.dto.js';
+import { PasskeyRegisterVerifyDto } from './dto/passkey-register-verify.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { TotpDisableDto } from './dto/totp-disable.dto.js';
@@ -333,5 +338,95 @@ export class AuthController {
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required.' })
   async getMe(@CurrentUser('id') userId: string) {
     return this.authService.getMe(userId);
+  }
+
+  @Post('passkeys/register/options')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate WebAuthn passkey registration options',
+    description: 'Generates cryptographic challenge and RP parameters to enroll a new passkey.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Passkey registration options generated.' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required.' })
+  async passkeyRegisterOptions(@CurrentUser('id') userId: string) {
+    return this.authService.generatePasskeyRegisterOptions(userId);
+  }
+
+  @Post('passkeys/register/verify')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify and persist WebAuthn passkey registration',
+    description: 'Verifies the authenticator attestation and registers the passkey public key.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Passkey registered successfully.' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid attestation or challenge.' })
+  async passkeyRegisterVerify(
+    @CurrentUser('id') userId: string,
+    @Body() dto: PasskeyRegisterVerifyDto,
+    @Headers('origin') originHeader?: string,
+  ) {
+    return this.authService.verifyPasskeyRegister(userId, dto, originHeader);
+  }
+
+  @Post('passkeys/login/options')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate WebAuthn passkey assertion authentication options',
+    description: 'Generates challenge for passkey sign-in. Supports discoverable passkeys.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Passkey authentication options generated.' })
+  async passkeyLoginOptions(@Body() dto?: PasskeyLoginOptionsDto) {
+    return this.authService.generatePasskeyLoginOptions(dto);
+  }
+
+  @Post('passkeys/login/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify WebAuthn passkey authentication assertion',
+    description: 'Verifies passkey signature and establishes an authenticated session.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Authenticated successfully via passkey.' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Passkey verification failed.' })
+  async passkeyLoginVerify(
+    @Body() dto: PasskeyLoginVerifyDto,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Headers('origin') originHeader: string | undefined,
+    @Ip() ip: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.verifyPasskeyLogin(dto, userAgent, ip, originHeader);
+    response.cookie(SESSION_COOKIE_NAME, result.rawToken, COOKIE_OPTIONS);
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    response.cookie(CSRF_COOKIE_NAME, csrfToken, CSRF_COOKIE_OPTIONS);
+    return { user: result.user, csrfToken };
+  }
+
+  @Get('passkeys')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'List user passkeys',
+    description: 'Retrieves all registered passkeys for the authenticated user.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Passkeys returned successfully.' })
+  async listPasskeys(@CurrentUser('id') userId: string) {
+    return this.authService.listPasskeys(userId);
+  }
+
+  @Delete('passkeys/:id')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Remove registered passkey',
+    description: 'Deletes a registered passkey for the authenticated user.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Passkey deleted successfully.' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Passkey not found.' })
+  async deletePasskey(@CurrentUser('id') userId: string, @Param('id') passkeyId: string) {
+    return this.authService.deletePasskey(userId, passkeyId);
   }
 }

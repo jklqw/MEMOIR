@@ -56,6 +56,7 @@ model User {
   memories             Memory[]
   attachments          Attachment[]
   backups              Backup[]
+  webauthnCredentials WebAuthnCredential[]
 
   @@map("users")
 }
@@ -178,5 +179,22 @@ model Backup {
 
   @@index([userId, createdAt])
   @@map("backups")
+}
+
+model WebAuthnCredential {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  credentialId String    @unique
+  publicKey    Bytes
+  counter      BigInt
+  transports   String[]
+  deviceName   String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("webauthn_credentials")
 }
 

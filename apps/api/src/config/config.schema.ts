@@ -16,6 +16,8 @@ export const EnvSchema = z.object({
   SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_FROM: z.string().default('no-reply@memoir.local'),
+  RP_ID: z.string().default('localhost'),
+  RP_NAME: z.string().default('Memoir'),
 });
 
 export type EnvConfig = z.infer<typeof EnvSchema>;

@@ -24,6 +24,12 @@ import type { ResetPasswordDto } from './dto/reset-password.dto.js';
 import type { TotpDisableDto } from './dto/totp-disable.dto.js';
 import type { TotpVerifyDto } from './dto/totp-verify.dto.js';
 import type { VerifyEmailDto } from './dto/verify-email.dto.js';
+import type { AuthenticatorTransport } from '@simplewebauthn/server';
+import { WebAuthnService } from './webauthn.service.js';
+import type { PasskeyRegisterVerifyDto } from './dto/passkey-register-verify.dto.js';
+import type { PasskeyLoginOptionsDto } from './dto/passkey-login-options.dto.js';
+import type { PasskeyLoginVerifyDto } from './dto/passkey-login-verify.dto.js';
+import type { PasskeyResponse } from '@memoir/shared';
 
 // Precomputed Argon2id dummy hash for anti-enumeration timing defense
 const DUMMY_ARGON2ID_HASH =
@@ -41,6 +47,7 @@ export class AuthService {
     @Inject(MailService) private readonly mailService: MailService,
     @Inject(RedisService) private readonly redisService: RedisService,
     @Inject(AppConfigService) private readonly config: AppConfigService,
+    @Inject(WebAuthnService) private readonly webauthnService: WebAuthnService,
   ) {}
 
   private async cacheSet(key: string, value: string, ttlSeconds: number): Promise<void> {
@@ -106,6 +113,7 @@ export class AuthService {
     user: { id: string; email: string },
     userAgent?: string,
     ip?: string,
+    loginMetadata?: Record<string, unknown>,
   ): Promise<{ user: { id: string; email: string }; rawToken: string }> {
     const rawToken = `memoir_s_${crypto.randomBytes(32).toString('hex')}`;
     const tokenHash = this.hashToken(rawToken);
@@ -133,6 +141,7 @@ export class AuthService {
         safeMetadata: {
           deviceLabel,
           ipMasked,
+          ...(loginMetadata || {}),
         },
       },
     });
@@ -861,5 +870,331 @@ export class AuthService {
       totpEnabled: user.totpEnabled,
       createdAt: user.createdAt,
     };
+  }
+
+  /**
+   * Generates WebAuthn registration options for an authenticated user.
+   */
+  async generatePasskeyRegisterOptions(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { webauthnCredentials: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('User not found.');
+    }
+
+    const rpName = this.config.get('RP_NAME') || 'Memoir';
+    const rpID = this.config.get('RP_ID') || 'localhost';
+
+    const options = await this.webauthnService.generateRegistrationOptions({
+      rpName,
+      rpID,
+      userID: Buffer.from(user.id, 'utf-8'),
+      userName: user.email,
+      userDisplayName: user.email,
+      attestationType: 'none',
+      excludeCredentials: user.webauthnCredentials.map((c) => ({
+        id: c.credentialId,
+        transports: c.transports as AuthenticatorTransport[],
+      })),
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',
+      },
+    });
+
+    await this.cacheSet(`memoir:webauthn:reg:${user.id}`, options.challenge, 300);
+    return options;
+  }
+
+  /**
+   * Verifies WebAuthn registration response and persists the new credential.
+   */
+  async verifyPasskeyRegister(
+    userId: string,
+    dto: PasskeyRegisterVerifyDto,
+    originHeader?: string,
+  ): Promise<{ message: string; credentialId: string }> {
+    const expectedChallenge = await this.cacheGet(`memoir:webauthn:reg:${userId}`);
+    if (!expectedChallenge) {
+      throw new BadRequestException('Passkey registration challenge expired or not found.');
+    }
+    await this.cacheDel(`memoir:webauthn:reg:${userId}`);
+
+    const rpID = this.config.get('RP_ID') || 'localhost';
+    const configuredOrigin = this.config.get('WEB_URL');
+    const allowedOrigins = [configuredOrigin, 'http://localhost:5173', 'http://127.0.0.1:5173'];
+    if (originHeader && !allowedOrigins.includes(originHeader)) {
+      allowedOrigins.push(originHeader);
+    }
+
+    let verification;
+    try {
+      verification = await this.webauthnService.verifyRegistrationResponse({
+        response: dto.response,
+        expectedChallenge,
+        expectedOrigin: allowedOrigins,
+        expectedRPID: rpID,
+        requireUserVerification: false,
+      });
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Passkey registration verification failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new BadRequestException('Passkey registration verification failed.');
+    }
+
+    if (!verification.verified || !verification.registrationInfo) {
+      throw new BadRequestException('Passkey registration could not be verified.');
+    }
+
+    const { credential } = verification.registrationInfo;
+
+    const created = await this.prisma.webAuthnCredential.create({
+      data: {
+        userId,
+        credentialId: credential.id,
+        publicKey: Buffer.from(credential.publicKey),
+        counter: BigInt(credential.counter),
+        transports: credential.transports || [],
+        deviceName: dto.deviceName || 'Passkey Device',
+      },
+    });
+
+    await this.prisma.securityEvent.create({
+      data: {
+        userId,
+        eventType: SecurityEventType.PASSKEY_ADDED,
+        safeMetadata: {
+          credentialId: credential.id,
+          deviceName: created.deviceName,
+        },
+      },
+    });
+
+    return { message: 'Passkey registered successfully.', credentialId: credential.id };
+  }
+
+  /**
+   * Generates WebAuthn authentication options for passkey sign-in.
+   */
+  async generatePasskeyLoginOptions(dto?: PasskeyLoginOptionsDto) {
+    const rpID = this.config.get('RP_ID') || 'localhost';
+    let allowCredentials;
+
+    if (dto?.email) {
+      const normalizedEmail = dto.email.trim().toLowerCase();
+      const user = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        include: { webauthnCredentials: true },
+      });
+      if (user && user.webauthnCredentials.length > 0) {
+        allowCredentials = user.webauthnCredentials.map((c) => ({
+          id: c.credentialId,
+          transports: c.transports as AuthenticatorTransport[],
+        }));
+      }
+    }
+
+    const options = await this.webauthnService.generateAuthenticationOptions({
+      rpID,
+      userVerification: 'preferred',
+      allowCredentials,
+    });
+
+    await this.cacheSet(
+      `memoir:webauthn:auth:${options.challenge}`,
+      JSON.stringify({ challenge: options.challenge, email: dto?.email }),
+      300,
+    );
+
+    return options;
+  }
+
+  /**
+   * Verifies WebAuthn authentication assertion and establishes session upon success.
+   */
+  async verifyPasskeyLogin(
+    dto: PasskeyLoginVerifyDto,
+    userAgent?: string,
+    ip?: string,
+    originHeader?: string,
+  ): Promise<{ user: { id: string; email: string }; rawToken: string }> {
+    const credentialId = dto.response?.id;
+    if (!credentialId) {
+      throw new BadRequestException('Passkey credential ID missing.');
+    }
+
+    const cred = await this.prisma.webAuthnCredential.findUnique({
+      where: { credentialId },
+      include: { user: true },
+    });
+
+    if (!cred) {
+      throw new UnauthorizedException('Unrecognized passkey credential.');
+    }
+
+    if (cred.user.accountStatus !== 'ACTIVE') {
+      throw new UnauthorizedException('Account is not active.');
+    }
+
+    if (cred.user.lockedUntil && cred.user.lockedUntil > new Date()) {
+      throw new UnauthorizedException('Account is temporarily locked. Please try again later.');
+    }
+
+    // Determine challenge from clientDataJSON or dto
+    let challenge = dto.challenge;
+    if (!challenge && dto.response?.response?.clientDataJSON) {
+      try {
+        const parsed = JSON.parse(
+          Buffer.from(dto.response.response.clientDataJSON, 'base64url').toString('utf-8'),
+        );
+        challenge = parsed.challenge;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!challenge) {
+      throw new BadRequestException('Authentication challenge could not be identified.');
+    }
+
+    const storedData = await this.cacheGet(`memoir:webauthn:auth:${challenge}`);
+    if (!storedData) {
+      throw new BadRequestException('Passkey login challenge expired or invalid.');
+    }
+    await this.cacheDel(`memoir:webauthn:auth:${challenge}`);
+
+    const rpID = this.config.get('RP_ID') || 'localhost';
+    const configuredOrigin = this.config.get('WEB_URL');
+    const allowedOrigins = [configuredOrigin, 'http://localhost:5173', 'http://127.0.0.1:5173'];
+    if (originHeader && !allowedOrigins.includes(originHeader)) {
+      allowedOrigins.push(originHeader);
+    }
+
+    let verification;
+    try {
+      verification = await this.webauthnService.verifyAuthenticationResponse({
+        response: dto.response,
+        expectedChallenge: challenge,
+        expectedOrigin: allowedOrigins,
+        expectedRPID: rpID,
+        credential: {
+          id: cred.credentialId,
+          publicKey: new Uint8Array(cred.publicKey),
+          counter: Number(cred.counter),
+          transports: cred.transports as AuthenticatorTransport[],
+        },
+        requireUserVerification: false,
+      });
+    } catch (err: unknown) {
+      await this.prisma.securityEvent.create({
+        data: {
+          userId: cred.userId,
+          eventType: SecurityEventType.LOGIN_FAILED,
+          safeMetadata: {
+            method: 'passkey',
+            credentialId,
+            reason: err instanceof Error ? err.message : 'verification_exception',
+          },
+        },
+      });
+      throw new UnauthorizedException('Passkey authentication verification failed.');
+    }
+
+    if (!verification.verified || !verification.authenticationInfo) {
+      await this.prisma.securityEvent.create({
+        data: {
+          userId: cred.userId,
+          eventType: SecurityEventType.LOGIN_FAILED,
+          safeMetadata: {
+            method: 'passkey',
+            credentialId,
+            reason: 'unverified_assertion',
+          },
+        },
+      });
+      throw new UnauthorizedException('Passkey authentication could not be verified.');
+    }
+
+    // Update counter and lastUsedAt
+    await this.prisma.webAuthnCredential.update({
+      where: { id: cred.id },
+      data: {
+        counter: BigInt(verification.authenticationInfo.newCounter),
+        lastUsedAt: new Date(),
+      },
+    });
+
+    // Reset failed login attempts
+    await this.prisma.user.update({
+      where: { id: cred.userId },
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    return this.createSessionForUser({ id: cred.user.id, email: cred.user.email }, userAgent, ip, {
+      method: 'passkey',
+      credentialId: cred.credentialId,
+    });
+  }
+
+  /**
+   * Lists all registered passkeys for an authenticated user.
+   */
+  async listPasskeys(userId: string): Promise<PasskeyResponse[]> {
+    const creds = await this.prisma.webAuthnCredential.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        credentialId: true,
+        deviceName: true,
+        createdAt: true,
+        lastUsedAt: true,
+        transports: true,
+      },
+    });
+
+    return creds.map((c) => ({
+      id: c.id,
+      credentialId: c.credentialId,
+      deviceName: c.deviceName,
+      createdAt: c.createdAt.toISOString(),
+      lastUsedAt: c.lastUsedAt ? c.lastUsedAt.toISOString() : null,
+      transports: c.transports,
+    }));
+  }
+
+  /**
+   * Deletes a registered passkey.
+   */
+  async deletePasskey(userId: string, passkeyId: string): Promise<{ message: string }> {
+    const cred = await this.prisma.webAuthnCredential.findFirst({
+      where: { id: passkeyId, userId },
+    });
+    if (!cred) {
+      throw new BadRequestException('Passkey credential not found.');
+    }
+
+    await this.prisma.webAuthnCredential.delete({
+      where: { id: cred.id },
+    });
+
+    await this.prisma.securityEvent.create({
+      data: {
+        userId,
+        eventType: SecurityEventType.PASSKEY_REMOVED,
+        safeMetadata: {
+          id: cred.id,
+          credentialId: cred.credentialId,
+        },
+      },
+    });
+
+    return { message: 'Passkey credential removed successfully.' };
   }
 }

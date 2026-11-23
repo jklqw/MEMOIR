@@ -357,7 +357,34 @@ Operational metadata visible to the server for synchronization:
   - `pnpm typecheck` -> PASS across all 4 packages (0 errors).
   - `pnpm lint` -> PASS (0 errors).
 - **Atomic Commit Ledger:**
-  - `21a95dd` — `security(2fa): implement TOTP 2FA, KMS-encrypted secrets, hashed backup codes, and password lifecycle`
+  - `0d11373` — `security(2fa): implement TOTP 2FA, KMS-encrypted secrets, hashed backup codes, and password lifecycle`
+
+#### Control 6.5: WebAuthn Passkeys & Explicit Zero-Knowledge Vault Boundary (Commit 37)
+
+- **Objective:** Implement FIDO2 / WebAuthn passkey registration and authentication using `@simplewebauthn`, storing public key credentials with strict IDOR ownership checks, counter replay protection, and explicit cryptographic assertion that passkey authentication satisfies server session establishment without mutating, touching, or decrypting client-side `user_vaults`.
+- **Implementation Summary:**
+  - Added Prisma migration `20261123210055_add_webauthn_credentials` creating `webauthn_credentials` table with UUID primary key, `userId` relation, unique `credentialId`, binary `publicKey`, `counter` BigInt, `transports` String array, and timestamps.
+  - Implemented `@Injectable() WebAuthnService` in `apps/api/src/auth/webauthn.service.ts` wrapping `@simplewebauthn/server` methods (`generateRegistrationOptions`, `verifyRegistrationResponse`, `generateAuthenticationOptions`, `verifyAuthenticationResponse`) ensuring testable dependency injection.
+  - Built passkey lifecycle in `AuthService`:
+    - `POST /api/v1/auth/passkeys/register/options`: Authenticated endpoint generating challenge stored in Redis (`memoir:webauthn:reg:<userId>`, 300s TTL) with configured `RP_ID` and user details.
+    - `POST /api/v1/auth/passkeys/register/verify`: Verifies attestation against challenge, persists credential with initial counter, and records `PASSKEY_ADDED` security event.
+    - `POST /api/v1/auth/passkeys/login/options`: Public endpoint generating challenge stored in Redis (`memoir:webauthn:auth:<challenge>`, 300s TTL) with userVerification required.
+    - `POST /api/v1/auth/passkeys/login/verify`: Verifies assertion against challenge, updates credential counter (preventing cloned authenticator replays) and `lastUsedAt`, resets `failedLoginAttempts`, issues authenticated session cookie, and records `LOGIN_SUCCESS` with `{ method: 'passkey', credentialId }`.
+    - `GET /api/v1/auth/passkeys`: Returns sanitized user credentials excluding raw public keys.
+    - `DELETE /api/v1/auth/passkeys/:id`: Enforces strict `userId` ownership check (denying IDOR attacks), deletes credential, and records `PASSKEY_REMOVED` event.
+  - Explicit **Three-Secret Separation & Zero-Knowledge Vault Boundary**:
+    - Passkey authentication satisfies session establishment on the server (`memoir_session` cookie).
+    - Under zero circumstance does passkey sign-in unlock, mutate, or decrypt `user_vaults`. Unlocking the zero-knowledge vault remains strictly protected by the client-side Vault Passphrase in volatile browser RAM.
+  - Built frontend UI:
+    - Passkey login option with `Fingerprint` icon in `apps/web/src/pages/LoginPage.tsx`.
+    - Passkeys & Biometric Logins section in `apps/web/src/pages/SecurityPage.tsx` with hardware enrollment modal, active passkey listing with delete action, and explicit Zero-Knowledge Vault Boundary callout.
+  - Authored automated test suite `apps/api/test/security-passkeys.spec.ts` (14 tests) verifying unauthenticated option rejection (401), registration generation, attestation verification rejection and success, authentication generation, invalid credential/challenge rejection, counter replay tracking, session creation, IDOR deletion denial, and cryptographic zero-knowledge vault immutability assertion.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/security-passkeys.spec.ts` -> 14 passed (100%).
+  - `pnpm typecheck` -> PASS across all 4 packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+- **Atomic Commit Ledger:**
+  - _(current)_ — `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`
 
 ---
 
@@ -404,7 +431,7 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - **Email Verification:** Dispatched via Mailpit SMTP; tokens stored as SHA-256 hashes with 24-hour expiration.
 - **Two-Factor Authentication (TOTP):** Full RFC 6238 implementation with QR code onboarding, KMS AES-256-GCM encryption for stored TOTP secrets (`memoir:kms:v1` AAD), and 10 single-use `XXXX-XXXX` backup codes stored as SHA-256 hashes. Backup codes are immediately consumed upon use.
 - **Three-Secret Separation & Credential Lifecycle:** Changing or resetting account passwords strictly updates the server authentication hash without touching, modifying, or corrupting `user_vaults`.
-- **Passkeys (WebAuthn):** Scheduled next in Phase 6.
+- **Passkeys (WebAuthn / FIDO2):** Full FIDO2 / WebAuthn passkey support via `@simplewebauthn` for biometric login and hardware security keys. Public key credentials stored with counter validation against replay attacks and strict IDOR deletion checks. Cryptographically guaranteed to establish server sessions without touching, decrypting, or modifying `user_vaults` (preserving Three-Secret Separation).
 
 ---
 
@@ -429,25 +456,27 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 
 ## 9. Automated Testing Matrix
 
-| Test Suite / Layer                  | Target Package   | Command                                            | Result          | Date       | Notes                                                                    |
-| :---------------------------------- | :--------------- | :------------------------------------------------- | :-------------- | :--------- | :----------------------------------------------------------------------- |
-| **Format Check**                    | Workspace Root   | `pnpm format:check`                                | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                              |
-| **Linting**                         | Workspace Root   | `pnpm lint`                                        | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                         |
-| **Typecheck**                       | All Packages     | `pnpm typecheck`                                   | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                                |
-| **Health Check Unit**               | `@memoir/api`    | `pnpm --filter @memoir/api test`                   | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                      |
-| **Database Integration**            | `@memoir/api`    | `vitest run test/database.spec.ts`                 | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity       |
-| **Auth & Email Verification**       | `@memoir/api`    | `vitest run test/auth-registration.spec.ts`        | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification     |
-| **Session Lifecycle & Replay**      | `@memoir/api`    | `vitest run test/auth-sessions.spec.ts`            | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout    |
-| **Session Scoping & IDOR Denial**   | `@memoir/api`    | `vitest run test/sessions.spec.ts`                 | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial     |
-| **Cryptographic 13 Invariants**     | `@memoir/crypto` | `pnpm --filter @memoir/crypto test`                | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32    |
-| **Vault Lifecycle & IDOR Denial**   | `@memoir/api`    | `vitest run test/vault.spec.ts`                    | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets    |
-| **Browser Vault Store & Auto-Lock** | `@memoir/web`    | `pnpm --filter @memoir/web test`                   | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock   |
-| **Encrypted Memories Persistence**  | `@memoir/api`    | `vitest run test/memories.spec.ts`                 | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking   |
-| **Memory Client Crypto & Search**   | `@memoir/web`    | `vitest run test/memory-crypto.spec.ts`            | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation  |
-| **Security Headers & Helmet**       | `@memoir/api`    | `vitest run test/security-headers.spec.ts`         | PASS (5 tests)  | 2026-11-23 | Verified CSP, HSTS, X-Content-Type-Options, Referrer-Policy, CORS        |
-| **CSRF, DTO Allowlist & XSS**       | `@memoir/api`    | `vitest run test/security-csrf-validation.spec.ts` | PASS (10 tests) | 2026-11-23 | Verified Double-Submit token check, stripped unknown fields, XSS inputs  |
-| **Rate Limiting & Account Lockout** | `@memoir/api`    | `vitest run test/security-ratelimit.spec.ts`       | PASS (6 tests)  | 2026-11-23 | Verified proxy IP isolation, Redis TTL, 5-failure lockout, success reset |
-| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`                  | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s                |
+| Test Suite / Layer                  | Target Package   | Command                                            | Result          | Date       | Notes                                                                      |
+| :---------------------------------- | :--------------- | :------------------------------------------------- | :-------------- | :--------- | :------------------------------------------------------------------------- |
+| **Format Check**                    | Workspace Root   | `pnpm format:check`                                | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                                |
+| **Linting**                         | Workspace Root   | `pnpm lint`                                        | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                           |
+| **Typecheck**                       | All Packages     | `pnpm typecheck`                                   | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                                  |
+| **Health Check Unit**               | `@memoir/api`    | `pnpm --filter @memoir/api test`                   | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                        |
+| **Database Integration**            | `@memoir/api`    | `vitest run test/database.spec.ts`                 | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity         |
+| **Auth & Email Verification**       | `@memoir/api`    | `vitest run test/auth-registration.spec.ts`        | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification       |
+| **Session Lifecycle & Replay**      | `@memoir/api`    | `vitest run test/auth-sessions.spec.ts`            | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout      |
+| **Session Scoping & IDOR Denial**   | `@memoir/api`    | `vitest run test/sessions.spec.ts`                 | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial       |
+| **Cryptographic 13 Invariants**     | `@memoir/crypto` | `pnpm --filter @memoir/crypto test`                | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32      |
+| **Vault Lifecycle & IDOR Denial**   | `@memoir/api`    | `vitest run test/vault.spec.ts`                    | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets      |
+| **Browser Vault Store & Auto-Lock** | `@memoir/web`    | `pnpm --filter @memoir/web test`                   | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock     |
+| **Encrypted Memories Persistence**  | `@memoir/api`    | `vitest run test/memories.spec.ts`                 | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking     |
+| **Memory Client Crypto & Search**   | `@memoir/web`    | `vitest run test/memory-crypto.spec.ts`            | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation    |
+| **Security Headers & Helmet**       | `@memoir/api`    | `vitest run test/security-headers.spec.ts`         | PASS (5 tests)  | 2026-11-23 | Verified CSP, HSTS, X-Content-Type-Options, Referrer-Policy, CORS          |
+| **CSRF, DTO Allowlist & XSS**       | `@memoir/api`    | `vitest run test/security-csrf-validation.spec.ts` | PASS (10 tests) | 2026-11-23 | Verified Double-Submit token check, stripped unknown fields, XSS inputs    |
+| **Rate Limiting & Account Lockout** | `@memoir/api`    | `vitest run test/security-ratelimit.spec.ts`       | PASS (6 tests)  | 2026-11-23 | Verified proxy IP isolation, Redis TTL, 5-failure lockout, success reset   |
+| **TOTP 2FA & Password Lifecycle**   | `@memoir/api`    | `vitest run test/security-2fa-lifecycle.spec.ts`   | PASS (15 tests) | 2026-11-23 | Verified KMS AES-GCM, single-use backup codes, and Three-Secret separation |
+| **WebAuthn Passkeys & Vault Guard** | `@memoir/api`    | `vitest run test/security-passkeys.spec.ts`        | PASS (14 tests) | 2026-11-23 | Verified FIDO2 passkeys, replay counter, IDOR checks, zero-knowledge lock  |
+| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`                  | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s                  |
 
 ---
 
@@ -482,43 +511,45 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 
 ## 13. Security Commit History
 
-| Commit Hash | Conventional Commit Message                                                                           | Security Control                      | Verification Status |
-| :---------- | :---------------------------------------------------------------------------------------------------- | :------------------------------------ | :------------------ |
-| `0ae4da7`   | `chore(repo): initialize git repository, workspace layout, and gitignore`                             | Git hygiene & secret exclusion        | Verified            |
-| `8c7ebc2`   | `docs(plan): define implementation plan, requirements, and repository standards`                      | Architecture & security specification | Verified            |
-| `995f464`   | `chore(tooling): configure pnpm TypeScript monorepo, ESLint, Prettier, and commit hooks`              | Strict type safety & code hygiene     | Verified            |
-| `ca2887a`   | `docs(report): initialize unified PROJECT_AND_SECURITY_REPORT.md with Phase 0 baseline`               | Verification baseline                 | Verified            |
-| `f352576`   | `docs(architecture): document system boundaries, STRIDE threat model, and privacy policy`             | STRIDE & Trust Boundaries             | Verified            |
-| `1f46d22`   | `chore(infra): add reproducible local Docker Compose services and env templates`                      | Infrastructure isolation              | Verified            |
-| `99896a5`   | `feat(api): scaffold NestJS foundation, Zod env validation, OpenAPI, and redacted logging`            | Log redaction & fail-fast validation  | Verified            |
-| `c221e9a`   | `feat(web): build responsive application shell and Archival Paper & Ink design system`                | Zero external tracking & fonts        | Verified            |
-| `2e46ef9`   | `docs(report): append Phase 1 architecture and shell verification to report`                          | Phase 1 milestone verification        | Verified            |
-| `32035a6`   | `feat(database): add initial Prisma schema and migrations for accounts, sessions, events`             | Relational integrity & cascade safety | Verified            |
-| `9fa3cd7`   | `feat(auth): implement registration, server Argon2id hashing, and email verification`                 | Argon2id & anti-enumeration hashing   | Verified            |
-| `51f3b2e`   | `feat(auth): implement opaque cookie sessions, rotation, and reuse detection`                         | Session rotation & replay revocation  | Verified            |
-| `835f0fb`   | `feat(web): build accessible registration, login, and email verification screens`                     | WCAG 2.2 AA & Three-Secret guidance   | Verified            |
-| `37233d9`   | `feat(auth): add active session management and remote device revocation`                              | IDOR prevention & remote revocation   | Verified            |
-| `965dd9e`   | `docs(report): append Phase 2 authentication verification to report`                                  | Phase 2 milestone verification        | Verified            |
-| `710eecf`   | `docs(crypto): specify versioned client-side encryption, key hierarchy, and recovery`                 | Versioned crypto specification        | Verified            |
-| `e49f3bf`   | `feat(crypto): implement versioned Argon2id, HKDF, AES-256-GCM, padding, and recovery`                | Client-side cryptographic engine      | Verified            |
-| `71c25a6`   | `test(crypto): verify cryptographic invariants, tamper rejection, nonces, and recovery`               | 13 Core Invariant verification suite  | Verified            |
-| `41e17ac`   | `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, recovery`            | Zero-knowledge vault lifecycle & UI   | Verified            |
-| `ad2267c`   | `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret storage`            | Vault lifecycle & RAM security tests  | Verified            |
-| `d73ede5`   | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`                   | Phase 3 milestone verification        | Verified            |
-| `979a836`   | `feat(memory): add encrypted memory schema and opaque persistence API`                                | Encrypted memory schema & CRUD        | Verified            |
-| `f5fe15b`   | `feat(memory): implement browser-side memory encryption service with AAD binding`                     | Client AAD binding & 256B padding     | Verified            |
-| `2ce9ef2`   | `feat(web): build distraction-free Markdown editor with autosave state machine`                       | Archival editor & autosave states     | Verified            |
-| `610f37f`   | `feat(memory): add chronological timeline, memory detail, calendar view, and local search`            | Local search & calendar metadata      | Verified            |
-| `eebb67e`   | `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and search`           | PG zero-plaintext & IDOR denial tests | Verified            |
-| `b43fc5a`   | `docs(report): append Phase 4 encrypted diary core verification to report`                            | Phase 4 milestone verification        | Verified            |
-| `6d05a5c`   | `feat(storage): add private attachment storage abstraction and quota enforcement`                     | Quota checks & server storageKey      | Verified            |
-| `380d0ed`   | `feat(attachments): implement client-side EXIF stripping and per-file AES-256-GCM encryption`         | Per-file keys & EXIF stripping        | Verified            |
-| `18a7ec4`   | `feat(vault): add Private Vault UI for standalone encrypted documents and photos`                     | Standalone vault files & quota meter  | Verified            |
-| `01b7ba2`   | `feat(portability): add encrypted backup export/import and warning-gated plaintext export`            | SHA-256 manifest & warning gate       | Verified            |
-| `5135008`   | `docs(report): append Phase 5 attachments and portability verification to report`                     | Phase 5 milestone verification        | Verified            |
-| `06aeb70`   | `security(headers): enforce strict CSP, HSTS, Helmet headers, and allowlisted CORS`                   | Strict CSP, HSTS, Helmet & CORS       | Verified            |
-| `c1082c3`   | `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests` | Double-Submit CSRF & DTO allowlist    | Verified            |
-| _(current)_ | `security(ratelimit): enforce proxy-aware Redis rate limiting and exponential account lockout`        | Proxy-Aware Rate Limiting & Lockout   | Verified            |
+| Commit Hash | Conventional Commit Message                                                                             | Security Control                      | Verification Status |
+| :---------- | :------------------------------------------------------------------------------------------------------ | :------------------------------------ | :------------------ |
+| `0ae4da7`   | `chore(repo): initialize git repository, workspace layout, and gitignore`                               | Git hygiene & secret exclusion        | Verified            |
+| `8c7ebc2`   | `docs(plan): define implementation plan, requirements, and repository standards`                        | Architecture & security specification | Verified            |
+| `995f464`   | `chore(tooling): configure pnpm TypeScript monorepo, ESLint, Prettier, and commit hooks`                | Strict type safety & code hygiene     | Verified            |
+| `ca2887a`   | `docs(report): initialize unified PROJECT_AND_SECURITY_REPORT.md with Phase 0 baseline`                 | Verification baseline                 | Verified            |
+| `f352576`   | `docs(architecture): document system boundaries, STRIDE threat model, and privacy policy`               | STRIDE & Trust Boundaries             | Verified            |
+| `1f46d22`   | `chore(infra): add reproducible local Docker Compose services and env templates`                        | Infrastructure isolation              | Verified            |
+| `99896a5`   | `feat(api): scaffold NestJS foundation, Zod env validation, OpenAPI, and redacted logging`              | Log redaction & fail-fast validation  | Verified            |
+| `c221e9a`   | `feat(web): build responsive application shell and Archival Paper & Ink design system`                  | Zero external tracking & fonts        | Verified            |
+| `2e46ef9`   | `docs(report): append Phase 1 architecture and shell verification to report`                            | Phase 1 milestone verification        | Verified            |
+| `32035a6`   | `feat(database): add initial Prisma schema and migrations for accounts, sessions, events`               | Relational integrity & cascade safety | Verified            |
+| `9fa3cd7`   | `feat(auth): implement registration, server Argon2id hashing, and email verification`                   | Argon2id & anti-enumeration hashing   | Verified            |
+| `51f3b2e`   | `feat(auth): implement opaque cookie sessions, rotation, and reuse detection`                           | Session rotation & replay revocation  | Verified            |
+| `835f0fb`   | `feat(web): build accessible registration, login, and email verification screens`                       | WCAG 2.2 AA & Three-Secret guidance   | Verified            |
+| `37233d9`   | `feat(auth): add active session management and remote device revocation`                                | IDOR prevention & remote revocation   | Verified            |
+| `965dd9e`   | `docs(report): append Phase 2 authentication verification to report`                                    | Phase 2 milestone verification        | Verified            |
+| `710eecf`   | `docs(crypto): specify versioned client-side encryption, key hierarchy, and recovery`                   | Versioned crypto specification        | Verified            |
+| `e49f3bf`   | `feat(crypto): implement versioned Argon2id, HKDF, AES-256-GCM, padding, and recovery`                  | Client-side cryptographic engine      | Verified            |
+| `71c25a6`   | `test(crypto): verify cryptographic invariants, tamper rejection, nonces, and recovery`                 | 13 Core Invariant verification suite  | Verified            |
+| `41e17ac`   | `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, recovery`              | Zero-knowledge vault lifecycle & UI   | Verified            |
+| `ad2267c`   | `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret storage`              | Vault lifecycle & RAM security tests  | Verified            |
+| `d73ede5`   | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`                     | Phase 3 milestone verification        | Verified            |
+| `979a836`   | `feat(memory): add encrypted memory schema and opaque persistence API`                                  | Encrypted memory schema & CRUD        | Verified            |
+| `f5fe15b`   | `feat(memory): implement browser-side memory encryption service with AAD binding`                       | Client AAD binding & 256B padding     | Verified            |
+| `2ce9ef2`   | `feat(web): build distraction-free Markdown editor with autosave state machine`                         | Archival editor & autosave states     | Verified            |
+| `610f37f`   | `feat(memory): add chronological timeline, memory detail, calendar view, and local search`              | Local search & calendar metadata      | Verified            |
+| `eebb67e`   | `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and search`             | PG zero-plaintext & IDOR denial tests | Verified            |
+| `b43fc5a`   | `docs(report): append Phase 4 encrypted diary core verification to report`                              | Phase 4 milestone verification        | Verified            |
+| `6d05a5c`   | `feat(storage): add private attachment storage abstraction and quota enforcement`                       | Quota checks & server storageKey      | Verified            |
+| `380d0ed`   | `feat(attachments): implement client-side EXIF stripping and per-file AES-256-GCM encryption`           | Per-file keys & EXIF stripping        | Verified            |
+| `18a7ec4`   | `feat(vault): add Private Vault UI for standalone encrypted documents and photos`                       | Standalone vault files & quota meter  | Verified            |
+| `01b7ba2`   | `feat(portability): add encrypted backup export/import and warning-gated plaintext export`              | SHA-256 manifest & warning gate       | Verified            |
+| `5135008`   | `docs(report): append Phase 5 attachments and portability verification to report`                       | Phase 5 milestone verification        | Verified            |
+| `06aeb70`   | `security(headers): enforce strict CSP, HSTS, Helmet headers, and allowlisted CORS`                     | Strict CSP, HSTS, Helmet & CORS       | Verified            |
+| `c1082c3`   | `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests`   | Double-Submit CSRF & DTO allowlist    | Verified            |
+| `f513799`   | `security(ratelimit): enforce proxy-aware Redis rate limiting and exponential account lockout`          | Proxy-Aware Rate Limiting & Lockout   | Verified            |
+| `0d11373`   | `security(2fa): implement TOTP 2FA, KMS-encrypted secrets, hashed backup codes, and password lifecycle` | RFC 6238 TOTP & KMS Secret Encryption | Verified            |
+| _(current)_ | `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`           | FIDO2 WebAuthn & Vault Lock Boundary  | Verified            |
 
 ---
 
@@ -531,10 +562,12 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
   - `20261123171352_add_memories_schema`
   - `20261123180453_add_attachments_schema`
   - `20261123184041_add_backups_schema`
+  - `20261123202341_add_password_reset_tokens`
+  - `20261123210055_add_webauthn_credentials`
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
-  - `@memoir/api`: 60 integration tests across 13 test suites passing (100%).
+  - `@memoir/api`: 89 integration tests across 15 test suites passing (100%).
   - `@memoir/web`: 19 frontend tests across 4 test suites passing (100%).
 - Web client builds deterministically with 100% self-hosted typography and zero external CDNs.
 
@@ -542,12 +575,11 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 
 ## 15. Final Engineering Assessment
 
-Phase 5 (Encrypted Attachments, Private Vault & Data Portability) is completed and verified against all criteria:
+Phase 6 Application Security Hardening is advancing under the strict One Commit Per Security Control policy:
 
-- **Zero-Knowledge File Storage:** Neither plaintext filenames nor raw file bytes reach storage or database. All files receive client-side stripped metadata, individual random 256-bit AES-256-GCM file keys wrapped under DEK, and opaque UUIDv4 storage keys.
-- **Secure Binary Downloads:** Downloads served strictly as binary streams with `application/octet-stream`, `nosniff`, and `attachment` disposition, preventing SVG/HTML stored-XSS execution.
-- **Private Vault UI:** Complete standalone document/photo vault with 250 MB quota progress meter, file categorization, and 100% RAM search.
-- **Tamper-Evident Data Portability:** Encrypted backup exports generate comprehensive `.memoir-backup.json` bundles verified via SHA-256 digests over all ciphertext envelopes and KDF parameters; single-bit tampering triggers immediate import failure.
-- **Warning-Gated Plaintext Export:** Plaintext export is shielded behind an explicit confirmation barrier requiring exact `CONFIRM EXPORT` confirmation and active in-RAM vault decryption.
-
-Repository status: Clean, passing all test, typecheck, lint, and build gates, ready for Phase 6: Application Security Hardening (one dedicated commit per security control).
+- **Security Headers & CORS (Commit 33):** Strict CSP, HSTS, Helmet, and allowlisted origins fully verified.
+- **CSRF & Injection Defenses (Commit 34):** Double-submit cookie CSRF protection and strict DTO whitelists passing.
+- **Rate Limiting & Lockout (Commit 35):** Proxy-aware Redis-backed rate limiting and exponential account lockout active.
+- **TOTP 2FA & Password Lifecycle (Commit 36):** RFC 6238 TOTP, KMS AES-256-GCM encrypted secrets, and single-use hashed backup codes implemented.
+- **Passkeys (Commit 37):** WebAuthn FIDO2 authentication landed with strict replay protection and zero-knowledge vault isolation.
+- **Upcoming Controls:** Audit logging & threat heuristics (Commit 38), Consolidated security regression suite (Commit 39), and Security CI/CD, secret scanning & dependency audits (Commit 40).

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SessionResponse } from '@memoir/shared';
+import type { PasskeyResponse, SessionResponse } from '@memoir/shared';
 import {
   AlertCircle,
   Check,
   CheckCircle2,
   Copy,
+  Fingerprint,
   Globe,
   KeyRound,
   Laptop,
@@ -30,7 +31,7 @@ interface TotpSetupResponse {
 
 export function SecurityPage() {
   const queryClient = useQueryClient();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, registerPasskey, isPasskeySupported } = useAuth();
   const [actionMessage, setActionMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -57,6 +58,11 @@ export function SecurityPage() {
   const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
+  // Passkey State
+  const [newPasskeyDeviceName, setNewPasskeyDeviceName] = useState('');
+  const [isRegisteringPasskey, setIsRegisteringPasskey] = useState(false);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+
   const {
     data: sessions = [],
     isLoading,
@@ -65,6 +71,15 @@ export function SecurityPage() {
   } = useQuery<SessionResponse[]>({
     queryKey: ['sessions'],
     queryFn: () => api.get<SessionResponse[]>('/api/v1/sessions'),
+  });
+
+  const {
+    data: passkeys = [],
+    isLoading: isPasskeysLoading,
+    refetch: refetchPasskeys,
+  } = useQuery<PasskeyResponse[]>({
+    queryKey: ['passkeys'],
+    queryFn: () => api.get<PasskeyResponse[]>('/api/v1/auth/passkeys'),
   });
 
   const revokeMutation = useMutation({
@@ -91,6 +106,20 @@ export function SecurityPage() {
       setActionMessage({
         type: 'error',
         text: err instanceof Error ? err.message : 'Failed to revoke other sessions.',
+      });
+    },
+  });
+
+  const deletePasskeyMutation = useMutation({
+    mutationFn: (passkeyId: string) => api.delete(`/api/v1/auth/passkeys/${passkeyId}`),
+    onSuccess: () => {
+      setActionMessage({ type: 'success', text: 'Passkey removed successfully.' });
+      void queryClient.invalidateQueries({ queryKey: ['passkeys'] });
+    },
+    onError: (err: unknown) => {
+      setActionMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to remove passkey.',
       });
     },
   });
@@ -167,6 +196,30 @@ export function SecurityPage() {
       });
     } finally {
       setIsSubmittingDisable(false);
+    }
+  };
+
+  // Register Passkey
+  const handleRegisterPasskey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActionMessage(null);
+    setIsRegisteringPasskey(true);
+    try {
+      await registerPasskey(newPasskeyDeviceName.trim() || undefined);
+      setNewPasskeyDeviceName('');
+      setIsRegisterModalOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ['passkeys'] });
+      setActionMessage({
+        type: 'success',
+        text: 'Passkey enrolled successfully! You can now use it for biometric / security key sign-in.',
+      });
+    } catch (err: unknown) {
+      setActionMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to register passkey with authenticator.',
+      });
+    } finally {
+      setIsRegisteringPasskey(false);
     }
   };
 
@@ -284,6 +337,25 @@ export function SecurityPage() {
               }`}
             >
               {user?.totpEnabled ? 'Active' : 'Disabled'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
+            <div>
+              <span className="text-ink font-medium block">WebAuthn Passkeys (FIDO2)</span>
+              <span className="text-[11px] text-ink-muted">
+                Hardware-bound biometric or security key authentication with server session
+                isolation
+              </span>
+            </div>
+            <span
+              className={`font-mono text-[11px] px-2 py-0.5 rounded ${
+                passkeys.length > 0
+                  ? 'bg-accent/10 text-accent font-semibold'
+                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              }`}
+            >
+              {passkeys.length > 0 ? `${passkeys.length} Active` : 'Available'}
             </span>
           </div>
 
@@ -552,6 +624,162 @@ export function SecurityPage() {
                 </div>
               </form>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Passkeys & Biometric Logins */}
+      <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <Fingerprint className="w-4 h-4 text-accent stroke-[1.5]" />
+            <span>Passkeys & Biometric Logins (WebAuthn / FIDO2)</span>
+          </div>
+          {isPasskeySupported && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void refetchPasskeys()}
+                title="Refresh passkeys list"
+                className="text-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1" strokeWidth={1.5} />
+                Refresh
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setIsRegisterModalOpen(true)}
+                className="text-xs"
+              >
+                <Fingerprint className="w-3.5 h-3.5 mr-1.5" />
+                Register New Passkey
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Authenticate quickly and securely with Touch ID, Face ID, Windows Hello, or a hardware
+          security key. Passkeys replace traditional passwords with phishing-resistant public-key
+          cryptography.
+        </p>
+
+        {/* Zero-Knowledge Vault Boundary callout */}
+        <div className="p-3 rounded-md bg-paper border border-border text-[11px] leading-relaxed text-ink-muted flex items-start gap-2">
+          <ShieldCheck className="w-4 h-4 text-accent shrink-0 mt-0.5" strokeWidth={1.5} />
+          <span>
+            <strong>Zero-Knowledge Vault Boundary:</strong> In strict adherence to our Three-Secret
+            Separation invariant, your Passkey authenticates your identity to establish an
+            authorized server session only. Your encrypted diary entries and local vault files
+            remain sealed until you enter your separate Vault Passphrase in browser RAM.
+          </span>
+        </div>
+
+        {!isPasskeySupported && (
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-xs text-amber-700 dark:text-amber-400 rounded">
+            Your current browser environment does not support WebAuthn / Passkeys.
+          </div>
+        )}
+
+        {isRegisterModalOpen && (
+          <form
+            onSubmit={handleRegisterPasskey}
+            className="p-4 bg-paper border border-border rounded-md space-y-3 max-w-md"
+          >
+            <div className="text-xs font-medium text-ink">Enroll New Passkey</div>
+            <div>
+              <label
+                htmlFor="passkeyDeviceName"
+                className="block text-xs font-medium text-ink mb-1"
+              >
+                Device Name / Label
+              </label>
+              <Input
+                id="passkeyDeviceName"
+                type="text"
+                placeholder="e.g., MacBook Touch ID or YubiKey 5"
+                value={newPasskeyDeviceName}
+                onChange={(e) => setNewPasskeyDeviceName(e.target.value)}
+                maxLength={100}
+              />
+              <p className="text-[11px] text-ink-muted mt-1">
+                A prompt from your operating system or browser will appear to verify your identity.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button type="submit" variant="primary" size="sm" disabled={isRegisteringPasskey}>
+                {isRegisteringPasskey ? 'Enrolling...' : 'Continue with Authenticator'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsRegisterModalOpen(false);
+                  setNewPasskeyDeviceName('');
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {isPasskeysLoading && (
+          <div className="py-4 text-center text-xs text-ink-muted">
+            Loading registered passkeys...
+          </div>
+        )}
+
+        {!isPasskeysLoading && passkeys.length === 0 && (
+          <p className="text-xs text-ink-muted py-2">
+            No passkeys registered yet. Click &quot;Register New Passkey&quot; to enroll your device
+            authenticator.
+          </p>
+        )}
+
+        {!isPasskeysLoading && passkeys.length > 0 && (
+          <div className="space-y-2.5">
+            {passkeys.map((passkey) => (
+              <div
+                key={passkey.id}
+                className="p-3 bg-paper border border-border rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded bg-surface border border-border flex items-center justify-center text-ink shrink-0">
+                    <Fingerprint className="w-4 h-4 text-accent" strokeWidth={1.5} />
+                  </div>
+                  <div>
+                    <div className="font-medium text-ink">{passkey.deviceName}</div>
+                    <div className="flex items-center gap-3 text-ink-muted text-[11px] font-mono mt-0.5">
+                      <span>Created: {new Date(passkey.createdAt).toLocaleDateString()}</span>
+                      <span>•</span>
+                      <span>
+                        Last used:{' '}
+                        {passkey.lastUsedAt
+                          ? new Date(passkey.lastUsedAt).toLocaleString()
+                          : 'Never'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={deletePasskeyMutation.isPending}
+                  onClick={() => deletePasskeyMutation.mutate(passkey.id)}
+                  className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 self-end sm:self-center"
+                  title="Remove this passkey"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" strokeWidth={1.5} />
+                  Remove
+                </Button>
+              </div>
+            ))}
           </div>
         )}
       </div>
