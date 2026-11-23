@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Menu, ShieldCheck } from 'lucide-react';
+import { LogOut, Menu, ShieldCheck } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 import { ThemeToggle } from '../ui/ThemeToggle.js';
@@ -16,6 +17,7 @@ export function Header({
   isVaultUnlocked = false,
 }: HeaderProps) {
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const { user, logout, isAuthenticated } = useAuth();
 
   return (
     <>
@@ -58,6 +60,19 @@ export function Header({
             <ShieldCheck className="w-3.5 h-3.5 text-accent stroke-[1.5]" />
             <span>Crypto Inspector</span>
           </Button>
+
+          {isAuthenticated && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void logout()}
+              className="text-xs text-ink-muted hover:text-ink gap-1.5"
+              title={user ? `Signed in as ${user.email}. Click to sign out.` : 'Sign out'}
+            >
+              <LogOut className="w-3.5 h-3.5 stroke-[1.5]" />
+              <span className="hidden md:inline">Sign Out</span>
+            </Button>
+          )}
 
           <ThemeToggle />
         </div>
