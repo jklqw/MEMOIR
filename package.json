@@ -13,7 +13,9 @@
     "test": "pnpm -r run test",
     "test:security": "pnpm --filter @memoir/api run test:security",
     "test:e2e": "playwright test",
-    "audit": "pnpm audit --audit-level=high"
+    "audit": "pnpm audit --audit-level=high",
+    "security:scan": "node scripts/scan-secrets.mjs",
+    "security:check": "pnpm lint && pnpm security:scan && pnpm test:security"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

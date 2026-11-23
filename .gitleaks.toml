@@ -1,0 +1,31 @@
+# Memoir Gitleaks Secret Scanning Configuration
+title = "Memoir Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "memoir-recovery-key"
+description = "Memoir Crockford Base32 256-bit Recovery Key pattern"
+regex = '''(?i)(?:recovery[_-]?key|recoveryKey)[\s:="']+[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}'''
+tags = ["key", "memoir", "recovery"]
+
+[[rules]]
+id = "memoir-dek-raw"
+description = "Memoir Raw 256-bit DEK Base64 String pattern"
+regex = '''(?i)(?:raw[_-]?dek|unwrapped[_-]?dek)[\s:="']+[A-Za-z0-9+/=]{43,44}'''
+tags = ["key", "memoir", "dek"]
+
+[allowlist]
+description = "Global allowlist for documentation, test fixtures, and mock vectors"
+paths = [
+  '''^apps/api/test/.*''',
+  '''^apps/web/test/.*''',
+  '''^packages/crypto/test/.*''',
+  '''\.env\.example$''',
+  '''PROJECT_AND_SECURITY_REPORT\.md$''',
+  '''PROJECT_MEMORY\.md$''',
+  '''GUIDE\.md$''',
+  '''IMPLEMENTATION_PLAN\.md$''',
+  '''scripts/scan-secrets\.mjs$'''
+]
