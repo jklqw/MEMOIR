@@ -5,6 +5,7 @@ import {
   utf8ToBytes,
 } from './encoding.util.js';
 import { stripJpegExif } from './exif.util.js';
+import { decryptEnvelope, encryptEnvelope } from './envelope.js';
 import type { EncryptedFileResult } from './types.js';
 
 /**
@@ -123,3 +124,45 @@ export async function decryptFileBytes(
 
   return new Uint8Array(decryptedBuffer);
 }
+
+/**
+ * Encrypts private attachment metadata ({ originalFilename, mimeType, originalSize })
+ * under DEK with AAD memoir:v1|attachment-meta|user:{userId}|id:{attachmentId}
+ */
+export async function encryptAttachmentMetadata(
+  metadata: { originalFilename: string; mimeType: string; originalSize: number },
+  dek: CryptoKey,
+  attachmentId: string,
+  userId: string,
+): Promise<{ encryptedMetadata: string; metaNonce: string }> {
+  const json = JSON.stringify(metadata);
+  const aad = `memoir:v1|attachment-meta|user:${userId}|id:${attachmentId}`;
+  const envelope = await encryptEnvelope(json, dek, aad, false);
+  return {
+    encryptedMetadata: envelope.ciphertext,
+    metaNonce: envelope.nonce,
+  };
+}
+
+/**
+ * Decrypts private attachment metadata under DEK with AAD.
+ */
+export async function decryptAttachmentMetadata(
+  encryptedMetadata: string,
+  metaNonce: string,
+  dek: CryptoKey,
+  attachmentId: string,
+  userId: string,
+): Promise<{ originalFilename: string; mimeType: string; originalSize: number }> {
+  const aad = `memoir:v1|attachment-meta|user:${userId}|id:${attachmentId}`;
+  const envelope = {
+    version: 1 as const,
+    algorithm: 'AES-256-GCM' as const,
+    ciphertext: encryptedMetadata,
+    nonce: metaNonce,
+  };
+  const decryptedBytes = await decryptEnvelope(envelope, dek, aad, false);
+  const jsonStr = new TextDecoder().decode(decryptedBytes);
+  return JSON.parse(jsonStr) as { originalFilename: string; mimeType: string; originalSize: number };
+}
+

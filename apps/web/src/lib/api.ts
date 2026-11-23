@@ -85,4 +85,21 @@ export const api = {
 
   delete: <T>(endpoint: string, options?: RequestInit) =>
     request<T>(endpoint, { method: 'DELETE', ...options }),
+
+  getBlob: async (endpoint: string): Promise<Uint8Array> => {
+    const url = endpoint.startsWith('/') ? endpoint : `/api/v1/${endpoint}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new ApiClientError(
+        `Blob request failed with status ${response.status}`,
+        'BLOB_ERROR',
+        response.status,
+      );
+    }
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  },
 };

@@ -25,8 +25,8 @@ out/
 *.db
 *.db-shm
 *.db-wal
-storage/uploads/
-storage/temp/
+storage/
+**/storage/
 
 # Logs
 logs/

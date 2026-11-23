@@ -17,12 +17,14 @@ import {
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import type { DecryptedMemory } from '@memoir/shared';
+import { useAttachments } from '../../hooks/useAttachments.js';
 import {
   useDeleteMemory,
   useRestoreMemory,
   useToggleArchive,
   useTogglePin,
 } from '../../hooks/useMemories.js';
+import { AttachmentPreview } from '../attachments/AttachmentPreview.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 
@@ -41,6 +43,7 @@ export function MemoryDetailModal({ memory, isOpen, onClose, onEdit }: MemoryDet
   const toggleArchiveMutation = useToggleArchive();
   const restoreMutation = useRestoreMemory();
   const deleteMutation = useDeleteMemory();
+  const { data: attachments = [] } = useAttachments({ memoryId: memory?.id });
 
   if (!memory) return null;
 
@@ -233,6 +236,26 @@ export function MemoryDetailModal({ memory, isOpen, onClose, onEdit }: MemoryDet
               >
                 {memory.bodyMarkdown || '*No content in this memory.*'}
               </ReactMarkdown>
+            </div>
+          )}
+
+          {/* Attached Files Grid */}
+          {attachments.length > 0 && (
+            <div className="space-y-3 pt-4 border-t border-border/70">
+              <div className="flex items-center justify-between text-xs text-ink-muted">
+                <span className="font-serif font-semibold text-ink">
+                  Attachments ({attachments.length})
+                </span>
+                <span className="font-mono text-[10px] text-ink-subtle">
+                  Zero-Knowledge Encrypted
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {attachments.map((att) => (
+                  <AttachmentPreview key={att.id} attachment={att} readOnly={false} />
+                ))}
+              </div>
             </div>
           )}
         </div>

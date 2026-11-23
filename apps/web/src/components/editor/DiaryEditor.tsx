@@ -7,6 +7,7 @@ import {
   Eye,
   Loader2,
   Lock,
+  Paperclip,
   PenLine,
   Pin,
   Save,
@@ -17,8 +18,10 @@ import {
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import type { DecryptedMemory } from '@memoir/shared';
+import { useAttachments, useUploadAttachment } from '../../hooks/useAttachments.js';
 import { useSaveMemory } from '../../hooks/useMemories.js';
 import { useVaultStore } from '../../stores/vaultStore.js';
+import { AttachmentPreview } from '../attachments/AttachmentPreview.js';
 import { Button } from '../ui/Button.js';
 
 export type AutosaveStatus = 'saved' | 'saving' | 'unsaved' | 'failed' | 'offline';
@@ -59,6 +62,34 @@ export function DiaryEditor({ initialMemory, onSaved, onOpenUnlock }: DiaryEdito
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDirtyRef = useRef(false);
 
+  // Attachment state & hooks
+  const uploadAttachmentMutation = useUploadAttachment();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { data: attachments = [] } = useAttachments({ memoryId });
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    let targetMemoryId = memoryId;
+    if (!targetMemoryId) {
+      const saved = await executeSave();
+      if (!saved) return;
+      targetMemoryId = saved.id;
+    }
+
+    try {
+      await uploadAttachmentMutation.mutateAsync({
+        file,
+        memoryId: targetMemoryId,
+      });
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const moods = [
     {
       label: 'Peaceful',
@@ -93,13 +124,13 @@ export function DiaryEditor({ initialMemory, onSaved, onOpenUnlock }: DiaryEdito
   ];
 
   // Core save function
-  const executeSave = useCallback(async () => {
-    if (!isUnlocked) return;
-    if (!title.trim() && !bodyMarkdown.trim()) return;
+  const executeSave = useCallback(async (): Promise<DecryptedMemory | null> => {
+    if (!isUnlocked) return null;
+    if (!title.trim() && !bodyMarkdown.trim()) return null;
 
     if (!navigator.onLine) {
       setAutosaveStatus('offline');
-      return;
+      return null;
     }
 
     setAutosaveStatus('saving');
@@ -127,8 +158,10 @@ export function DiaryEditor({ initialMemory, onSaved, onOpenUnlock }: DiaryEdito
       isDirtyRef.current = false;
       setAutosaveStatus('saved');
       if (onSaved) onSaved(saved);
+      return saved;
     } catch {
       setAutosaveStatus('failed');
+      return null;
     }
   }, [
     isUnlocked,
@@ -300,6 +333,29 @@ export function DiaryEditor({ initialMemory, onSaved, onOpenUnlock }: DiaryEdito
             <Clock className="w-3.5 h-3.5 stroke-[1.5]" />
             <span>Time Capsule</span>
           </button>
+
+          {/* Attachment Upload Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadAttachmentMutation.isPending}
+            className="flex items-center gap-1 px-2 py-1 rounded-md border bg-surface border-border text-ink-muted hover:text-ink transition-colors cursor-pointer"
+            title="Attach encrypted photo or document (10 MB max)"
+          >
+            {uploadAttachmentMutation.isPending ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+            ) : (
+              <Paperclip className="w-3.5 h-3.5 stroke-[1.5]" />
+            )}
+            <span>{uploadAttachmentMutation.isPending ? 'Encrypting...' : 'Attach'}</span>
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+            className="hidden"
+            accept="image/*,.pdf,.txt,.md,.json"
+          />
         </div>
 
         {/* Right Status Indicator and Actions */}
@@ -483,6 +539,24 @@ export function DiaryEditor({ initialMemory, onSaved, onOpenUnlock }: DiaryEdito
           ) : (
             <p className="text-xs font-mono text-ink-subtle italic">Empty memory</p>
           )}
+        </div>
+      )}
+
+      {/* Attached Encrypted Files */}
+      {attachments.length > 0 && (
+        <div className="space-y-3 pt-6 border-t border-border/70">
+          <div className="flex items-center justify-between text-xs text-ink-muted">
+            <span className="font-serif font-semibold text-ink">
+              Attachments ({attachments.length})
+            </span>
+            <span className="font-mono text-[10px] text-ink-subtle">Zero-Knowledge Encrypted</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {attachments.map((att) => (
+              <AttachmentPreview key={att.id} attachment={att} />
+            ))}
+          </div>
         </div>
       )}
     </div>
