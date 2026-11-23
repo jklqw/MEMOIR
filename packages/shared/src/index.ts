@@ -1,0 +1,41 @@
+/**
+ * @memoir/shared
+ * Safe shared DTOs, Zod schemas, enums, error codes across frontend and backend.
+ */
+
+export const MEMOIR_PROTOCOL_VERSION = 1;
+
+export enum AccountStatus {
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+  PENDING_DELETION = 'PENDING_DELETION',
+}
+
+export enum SecurityEventType {
+  LOGIN_SUCCESS = 'LOGIN_SUCCESS',
+  LOGIN_FAILED = 'LOGIN_FAILED',
+  LOCKOUT_TRIGGERED = 'LOCKOUT_TRIGGERED',
+  EMAIL_VERIFIED = 'EMAIL_VERIFIED',
+  PASSWORD_CHANGED = 'PASSWORD_CHANGED',
+  VAULT_CREATED = 'VAULT_CREATED',
+  VAULT_PASSPHRASE_ROTATED = 'VAULT_PASSPHRASE_ROTATED',
+  RECOVERY_KEY_USED = 'RECOVERY_KEY_USED',
+  TOTP_ENABLED = 'TOTP_ENABLED',
+  TOTP_DISABLED = 'TOTP_DISABLED',
+  PASSKEY_ADDED = 'PASSKEY_ADDED',
+  PASSKEY_REMOVED = 'PASSKEY_REMOVED',
+  SESSION_REVOKED = 'SESSION_REVOKED',
+  SUSPICIOUS_LOGIN = 'SUSPICIOUS_LOGIN',
+  BACKUP_EXPORTED = 'BACKUP_EXPORTED',
+  ACCOUNT_DELETION_REQUESTED = 'ACCOUNT_DELETION_REQUESTED',
+}
+
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}

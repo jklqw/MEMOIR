@@ -6,10 +6,10 @@ At Memoir, security and privacy are not secondary features; they are the archite
 
 ## 1. Supported Versions
 
-| Version | Supported | Security Notes |
-| :--- | :--- | :--- |
-| `1.x.x` | Yes | Active production line |
-| `< 1.0.0` | No | Development / Pre-release |
+| Version   | Supported | Security Notes            |
+| :-------- | :-------- | :------------------------ |
+| `1.x.x`   | Yes       | Active production line    |
+| `< 1.0.0` | No        | Development / Pre-release |
 
 ---
 
@@ -21,12 +21,14 @@ Instead, report vulnerabilities privately by sending an email to:
 **`security@memoir.local`** (or through GitHub Private Vulnerability Reporting on the repository).
 
 ### Please include in your report:
+
 - Type of vulnerability (e.g., cryptographic flaw, authentication bypass, IDOR, XSS, injection)
 - Step-by-step reproduction instructions or a minimal Proof of Concept (PoC)
 - Affected components (`apps/api`, `apps/web`, `packages/crypto`, or infrastructure)
 - Any potential impact on user ciphertext confidentiality or key isolation
 
 ### Triage Timeline:
+
 - **Initial acknowledgment:** Within 24 hours.
 - **Triage & severity assessment:** Within 72 hours.
 - **Remediation & patch release:** Timelines determined based on CVSS severity (critical vulnerabilities targeted within 7 days).

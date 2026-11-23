@@ -18,6 +18,7 @@ Thank you for contributing to Memoir. As an end-to-end encrypted personal diary 
 We adhere strictly to [Conventional Commits v1.0.0](https://www.conventionalcommits.org/).
 
 ### Allowed Commit Types
+
 - `feat`: User-facing features or major capabilities
 - `fix`: Bug fixes
 - `security`: Dedicated security controls, hardening, or vulnerability mitigations
@@ -29,6 +30,7 @@ We adhere strictly to [Conventional Commits v1.0.0](https://www.conventionalcomm
 - `refactor`: Code refactoring without behavior change
 
 ### Format
+
 ```text
 <type>(<scope>): <imperative concise subject>
 
@@ -36,6 +38,7 @@ We adhere strictly to [Conventional Commits v1.0.0](https://www.conventionalcomm
 ```
 
 ### Branch Naming
+
 - `feature/<short-description>`
 - `security/<vulnerability-or-control>`
 - `fix/<issue-description>`
@@ -72,6 +75,7 @@ pnpm build
 ## 4. Security-Sensitive Contributions
 
 If your PR touches any of the following areas:
+
 - `packages/crypto/`
 - `apps/api/src/auth/`
 - `apps/api/src/vault/`
@@ -79,6 +83,7 @@ If your PR touches any of the following areas:
 - Content Security Policy (CSP) or CORS configs
 
 You **must**:
+
 1. Include automated tests proving tamper rejection, boundary enforcement, and failure modes.
 2. Update `docs/CRYPTOGRAPHY.md` or `docs/THREAT_MODEL.md` as appropriate.
 3. Add verified output and rationale to `PROJECT_AND_SECURITY_REPORT.md`.

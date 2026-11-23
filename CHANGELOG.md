@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Phase 0 foundation: repository layout, workspace manifests, and development setup documentation.
 - Implementation plan and comprehensive engineering roadmap (`docs/IMPLEMENTATION_PLAN.md`).
 - Exact runtime environment and dependency requirements (`docs/REQUIREMENTS.md`, `docs/DEVELOPMENT_SETUP.md`).
