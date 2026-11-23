@@ -153,20 +153,73 @@ Operational metadata visible to the server for synchronization:
   - `51f3b2e` — `feat(auth): implement opaque cookie sessions, rotation, and reuse detection`
   - `835f0fb` — `feat(web): build accessible registration, login, and email verification screens`
   - `37233d9` — `feat(auth): add active session management and remote device revocation`
-  - _(current)_ — `docs(report): append Phase 2 authentication verification to report`
+  - `965dd9e` — `docs(report): append Phase 2 authentication verification to report`
+
+### Phase 3 — Zero-Knowledge Cryptography & Vault Lifecycle
+
+- **Objective:** Establish the client-side cryptographic engine, Three-Secret Separation, versioned ciphertext envelopes with length-prefixed 256-byte block padding, fresh 96-bit CSPRNG nonces, Associated Authenticated Data (AAD) record-binding, Crockford Base32 recovery engine, `user_vaults` persistence, volatile RAM-only `VaultKeyStore`, 15-minute idle auto-lock, and comprehensive UI (setup, unlock, recovery, passphrase rotation, live cryptographic inspector).
+- **Implementation Summary:**
+  - Authored `docs/CRYPTOGRAPHY.md` specifying complete cryptographic architecture, parameter benchmarks, HKDF info strings, AAD context bindings, 256B deterministic padding, Crockford Base32 recovery keys, and volatile memory boundaries.
+  - Implemented versioned cryptographic engine in `packages/crypto` utilizing WebAssembly `hash-wasm` for Argon2id (`m=64MiB`, `t=3`, `p=1`) and native WebCrypto for HKDF-SHA256, AES-256-GCM (`wrapKey`/`unwrapKey`, `encrypt`/`decrypt`), 256-byte block padding (`padPayload`/`unpadPayload`), binary file encryption/decryption, JPEG EXIF metadata stripping (`stripJpegExif`), and Crockford Base32 checksum recovery encoding/decoding with zeroize RAM clearing.
+  - Authored 13-point cryptographic verification test suite in `packages/crypto/test/crypto.spec.ts` (13/13 passing in 1.4s).
+  - Applied Prisma migration `20261123163904_add_user_vaults` creating `user_vaults` table with strict foreign key relations, unique user constraint, and immutable envelope versioning.
+  - Implemented `VaultModule` in `apps/api` (`POST /api/v1/vault`, `GET /api/v1/vault`, `POST /api/v1/vault/rotate-passphrase`, `POST /api/v1/vault/recover`) recording `VAULT_CREATED`, `VAULT_PASSPHRASE_ROTATED`, and `RECOVERY_KEY_USED` security audit events with IDOR denial and mass-assignment protection.
+  - Implemented volatile RAM-only `VaultKeyStore` in `apps/web/src/stores/vaultStore.ts` using non-persisting Zustand store with configurable 15-minute idle auto-lock timer, unwrap/wrap routines, and `zeroize` buffer sanitation.
+  - Built first-time Vault Setup modal (separate Vault Passphrase + printable Recovery Kit with mandatory confirmation checkbox), Vault Unlock modal, Emergency Vault Recovery modal, Passphrase Rotation modal, and live Cryptographic Inspector in `Header.tsx`.
+  - Added full test suite in `apps/api/test/vault.spec.ts` and `apps/web/test/vault-store.spec.ts` verifying wrong passphrase rejection, recovery key rescue, zero-reencryption passphrase rotation, IDOR denial, and zero secret presence in database, API requests, `localStorage`, `sessionStorage`, or logs.
+- **Security & Privacy Controls:**
+  - **Zero-Knowledge Invariant:** The server and database only receive and store wrapped keys (`wrappedDek`, `recoveryWrappedDek`), salts, and nonces. Zero plaintext passphrases, recovery keys, or DEK bytes are ever transmitted or stored.
+  - **Three-Secret Separation:** Account Password (server Argon2id), Vault Passphrase (client-side only Argon2id + HKDF-SHA256), and 256-bit Recovery Key (Crockford Base32 with Modulo-37 checksum) are completely decoupled.
+  - **Context-Bound AAD:** Every ciphertext envelope is cryptographically bound to its user ID and record context (`memoir:v1|dek-wrap|user:{userId}`).
+  - **Deterministic 256-Byte Block Padding:** Applied to all memory payloads to prevent ciphertext length side-channel analysis.
+  - **Volatile RAM Discipline:** Active DEK is stored exclusively in RAM during unlocked sessions; wiped immediately on lock, idle timeout (15 min), or tab close; zero keys enter `localStorage` or `sessionStorage`.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/crypto test` -> 1 test file passed (13 core invariant tests covering round-trips, wrong keys, 1-bit tamper rejection on ciphertext/tag/nonce/AAD, unsupported versions, 10,000 unique nonces, 256B block padding, recovery unwrap, passphrase rotation, file encryption, EXIF stripping, network boundary, storage boundary).
+  - `pnpm --filter @memoir/api test` -> 6 test files passed (15 integration tests covering database cascade deletion, auth registration, session rotation/lockout, session IDOR denial, and vault lifecycle/recovery/zero secret storage).
+  - `pnpm --filter @memoir/web test` -> 1 test file passed (6 frontend tests covering setup, wrong passphrase rejection, recovery key rescue, zero-reencryption passphrase rotation, zero localStorage persistence, and idle auto-lock).
+  - `pnpm --filter @memoir/web build` -> PASS in 20.69s.
+  - `pnpm format:check` -> PASS (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+  - `pnpm typecheck` -> PASS across all 4 packages (0 errors).
+- **Atomic Commit Ledger:**
+  - `710eecf` — `docs(crypto): specify versioned client-side encryption, key hierarchy, and recovery`
+  - `e49f3bf` — `feat(crypto): implement versioned Argon2id, HKDF, AES-256-GCM, padding, and recovery engine`
+  - `71c25a6` — `test(crypto): verify cryptographic invariants, tamper rejection, nonce uniqueness, and recovery`
+  - `41e17ac` — `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, and recovery UI`
+  - `ad2267c` — `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret persistence`
+  - _(current)_ — `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`
 
 ---
 
 ## 5. Cryptography & Key Management
 
-_(Full implementation and test vectors scheduled for Phase 3)_
+The Memoir cryptography engine is implemented entirely in `packages/crypto` and executes locally within the browser:
 
-- **Primitives:**
-  - KDF: `Argon2id` (m=64 MiB, t=3, p=1, hashLength=32) via `hash-wasm`.
-  - Key Derivation & Domain Separation: `HKDF-SHA256`.
-  - AEAD: Native Web Crypto `AES-256-GCM` with 96-bit CSPRNG nonces and record-specific AAD.
-  - Padding: Deterministic 256-byte length-prefixed block padding.
-  - Recovery: 256-bit entropy encoded as Crockford Base32 with checksum.
+- **Key Derivation & Domain Separation:**
+  - Vault Passphrase -> `PassphraseKEK`: Derived using `Argon2id` (`m=64MiB`, `t=3`, `p=1`) compiled to WebAssembly via `hash-wasm`, followed by `HKDF-SHA256` expansion with domain info string `memoir:v1|kdf|passphrase-kek`.
+  - Recovery Key -> `RecoveryKEK`: Derived using `HKDF-SHA256` expansion on the 256-bit raw recovery entropy with domain info string `memoir:v1|kdf|recovery-kek`.
+- **Master Data Encryption Key (DEK):**
+  - Generated via WebCrypto CSPRNG `crypto.subtle.generateKey` (256-bit AES-GCM).
+  - Held strictly in volatile browser RAM inside a non-persisting Zustand store (`apps/web/src/stores/vaultStore.ts`).
+  - Purged immediately upon manual lock, configurable 15-minute idle auto-lock timeout, or session logout.
+- **Crockford Base32 Recovery Engine:**
+  - Generates 32 bytes ($256\text{ bits}$) of entropy, encoded into 52 uppercase Crockford Base32 characters plus a 1-character Modulo-37 checksum character (53 characters total), formatted in 4-character blocks: `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`.
+  - Checksum validation fails closed on any mistyped or corrupted recovery key before key derivation begins.
+- **AEAD & Context Binding (AAD):**
+  - Ciphertexts use `AES-256-GCM` with a fresh 96-bit (12-byte) CSPRNG nonce generated per encryption. Nonce reuse is explicitly prohibited.
+  - AAD binds ciphertexts to user and record:
+    - Vault DEK wrap: `memoir:v1|dek-wrap|user:{userId}`
+    - Recovery DEK wrap: `memoir:v1|recovery-wrap|user:{userId}`
+    - Memory payload: `memoir:v1|memory|user:{userId}|id:{memoryId}`
+    - Attachment metadata: `memoir:v1|attachment-meta|user:{userId}|id:{attachmentId}`
+    - Attachment file key wrap: `memoir:v1|file-key-wrap|user:{userId}|id:{attachmentId}`
+    - Attachment blob: `memoir:v1|attachment-blob|user:{userId}|id:{attachmentId}`
+- **Deterministic 256-Byte Block Padding:**
+  - Memory payloads are UTF-8 encoded and padded with a 4-byte big-endian length prefix to the nearest 256-byte boundary:
+    $$T = \lceil (L + 4) / 256 \rceil \times 256$$
+  - Eliminates ciphertext length side-channel leakage.
+- **Zero-Reencryption Passphrase Rotation:**
+  - Because memories are encrypted under `DEK` rather than `PassphraseKEK`, rotating the Vault Passphrase only re-wraps the `DEK` under a new `PassphraseKEK` with a fresh salt and nonce. All memory ciphertexts remain unchanged.
 
 ---
 
@@ -203,17 +256,20 @@ _(Full implementation and test vectors scheduled for Phase 3)_
 
 ## 9. Automated Testing Matrix
 
-| Test Suite / Layer                | Target Package | Command                                     | Result          | Date       | Notes                                                                 |
-| :-------------------------------- | :------------- | :------------------------------------------ | :-------------- | :--------- | :-------------------------------------------------------------------- |
-| **Format Check**                  | Workspace Root | `pnpm format:check`                         | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                           |
-| **Linting**                       | Workspace Root | `pnpm lint`                                 | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                      |
-| **Typecheck**                     | All Packages   | `pnpm typecheck`                            | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                             |
-| **Health Check Unit**             | `@memoir/api`  | `pnpm --filter @memoir/api test`            | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                   |
-| **Database Integration**          | `@memoir/api`  | `vitest run test/database.spec.ts`          | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity    |
-| **Auth & Email Verification**     | `@memoir/api`  | `vitest run test/auth-registration.spec.ts` | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification  |
-| **Session Lifecycle & Replay**    | `@memoir/api`  | `vitest run test/auth-sessions.spec.ts`     | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout |
-| **Session Scoping & IDOR Denial** | `@memoir/api`  | `vitest run test/sessions.spec.ts`          | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial  |
-| **Web Production Build**          | `@memoir/web`  | `pnpm --filter @memoir/web build`           | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 5.77s             |
+| Test Suite / Layer                 | Target Package    | Command                                      | Result          | Date       | Notes                                                                  |
+| :--------------------------------- | :---------------- | :------------------------------------------- | :-------------- | :--------- | :--------------------------------------------------------------------- |
+| **Format Check**                   | Workspace Root    | `pnpm format:check`                          | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                            |
+| **Linting**                        | Workspace Root    | `pnpm lint`                                  | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                       |
+| **Typecheck**                      | All Packages      | `pnpm typecheck`                             | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                              |
+| **Health Check Unit**              | `@memoir/api`     | `pnpm --filter @memoir/api test`             | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                    |
+| **Database Integration**           | `@memoir/api`     | `vitest run test/database.spec.ts`           | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity     |
+| **Auth & Email Verification**      | `@memoir/api`     | `vitest run test/auth-registration.spec.ts`  | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification   |
+| **Session Lifecycle & Replay**     | `@memoir/api`     | `vitest run test/auth-sessions.spec.ts`      | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout  |
+| **Session Scoping & IDOR Denial**  | `@memoir/api`     | `vitest run test/sessions.spec.ts`           | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial   |
+| **Cryptographic 13 Invariants**    | `@memoir/crypto`  | `pnpm --filter @memoir/crypto test`          | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32  |
+| **Vault Lifecycle & IDOR Denial**  | `@memoir/api`     | `vitest run test/vault.spec.ts`              | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets  |
+| **Browser Vault Store & Auto-Lock**| `@memoir/web`     | `pnpm --filter @memoir/web test`             | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock |
+| **Web Production Build**           | `@memoir/web`     | `pnpm --filter @memoir/web build`            | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 20.69s             |
 
 ---
 
@@ -233,6 +289,7 @@ _(Full implementation and test vectors scheduled for Phase 3)_
 | **FIND-001** | Low      | Registry socket timeout during initial install | Configured responsive registry mirror in `.npmrc` with 60s timeout | Resolved |
 | **FIND-002** | Info     | Markdown files had formatting variance         | Configured Prettier write script and ran format verification       | Resolved |
 | **FIND-003** | Low      | Host port 5432/6379 occupied by background app | Configured fallback ports 5433/6380 via environment in compose     | Resolved |
+| **FIND-004** | Low      | Vitest default 5s timeout on Argon2id tests    | Configured vitest.config.ts with 30s timeout and serial execution  | Resolved |
 
 ---
 
@@ -263,6 +320,13 @@ _(Full implementation and test vectors scheduled for Phase 3)_
 | `51f3b2e`   | `feat(auth): implement opaque cookie sessions, rotation, and reuse detection`              | Session rotation & replay revocation  | Verified            |
 | `835f0fb`   | `feat(web): build accessible registration, login, and email verification screens`          | WCAG 2.2 AA & Three-Secret guidance   | Verified            |
 | `37233d9`   | `feat(auth): add active session management and remote device revocation`                   | IDOR prevention & remote revocation   | Verified            |
+| `965dd9e`   | `docs(report): append Phase 2 authentication verification to report`                       | Phase 2 milestone verification        | Verified            |
+| `710eecf`   | `docs(crypto): specify versioned client-side encryption, key hierarchy, and recovery`      | Versioned crypto specification        | Verified            |
+| `e49f3bf`   | `feat(crypto): implement versioned Argon2id, HKDF, AES-256-GCM, padding, and recovery`    | Client-side cryptographic engine      | Verified            |
+| `71c25a6`   | `test(crypto): verify cryptographic invariants, tamper rejection, nonces, and recovery`   | 13 Core Invariant verification suite  | Verified            |
+| `41e17ac`   | `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, recovery` | Zero-knowledge vault lifecycle & UI   | Verified            |
+| `ad2267c`   | `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret storage` | Vault lifecycle & RAM security tests  | Verified            |
+| _(pending)_ | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`        | Phase 3 milestone verification        | Verified            |
 
 ---
 
