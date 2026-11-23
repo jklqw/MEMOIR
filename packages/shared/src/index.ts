@@ -125,14 +125,26 @@ export const CreateVaultSchema = z.object({
 export type CreateVaultDto = z.infer<typeof CreateVaultSchema>;
 
 export const RotatePassphraseSchema = z.object({
-  kdfSalt: z.string().min(16),
-  wrappedDek: z.string().min(1),
-  wrappedDekNonce: z.string().min(1),
+  kdfSalt: z.string().min(16, 'Salt must be at least 16 characters'),
+  kdfMemory: z.number().int().min(1024).optional(),
+  kdfIterations: z.number().int().min(1).optional(),
+  kdfParallelism: z.number().int().min(1).optional(),
+  wrappedDek: z.string().min(1, 'Wrapped DEK is required'),
+  wrappedDekNonce: z.string().min(1, 'Wrapped DEK nonce is required'),
 });
 export type RotatePassphraseDto = z.infer<typeof RotatePassphraseSchema>;
 
 export const RecoverVaultSchema = z.object({
-  recoveryKey: z.string().trim().min(32, 'Recovery key is required'),
+  kdfSalt: z.string().min(16, 'Salt must be at least 16 characters'),
+  kdfMemory: z.number().int().min(1024).optional(),
+  kdfIterations: z.number().int().min(1).optional(),
+  kdfParallelism: z.number().int().min(1).optional(),
+  wrappedDek: z.string().min(1, 'Wrapped DEK is required'),
+  wrappedDekNonce: z.string().min(1, 'Wrapped DEK nonce is required'),
+  recoverySalt: z.string().min(16).optional(),
+  recoveryWrappedDek: z.string().min(1).optional(),
+  recoveryNonce: z.string().min(1).optional(),
+  recoveryKeyFingerprint: z.string().min(1).optional(),
 });
 export type RecoverVaultDto = z.infer<typeof RecoverVaultSchema>;
 

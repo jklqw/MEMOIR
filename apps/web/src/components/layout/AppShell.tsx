@@ -8,28 +8,36 @@ import {
   FolderLock,
   Lock,
   LogOut,
+  RefreshCw,
   Settings,
   Shield,
+  Unlock,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext.js';
 import { cn } from '../../lib/utils.js';
+import { useVaultStore } from '../../stores/vaultStore.js';
+import { PassphraseRotationModal } from '../vault/PassphraseRotationModal.js';
+import { VaultIdleWatcher } from '../vault/VaultIdleWatcher.js';
+import { VaultRecoveryModal } from '../vault/VaultRecoveryModal.js';
+import { VaultSetupModal } from '../vault/VaultSetupModal.js';
+import { VaultUnlockModal } from '../vault/VaultUnlockModal.js';
 import { Header } from './Header.js';
 
 export interface AppShellProps {
   children: React.ReactNode;
-  isVaultUnlocked?: boolean;
-  onLockVault?: () => void;
-  onLogout?: () => void;
 }
 
-export function AppShell({
-  children,
-  isVaultUnlocked = false,
-  onLockVault,
-  onLogout,
-}: AppShellProps) {
+export function AppShell({ children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [setupModalOpen, setSetupModalOpen] = useState(false);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+  const [recoveryModalOpen, setRecoveryModalOpen] = useState(false);
+  const [rotationModalOpen, setRotationModalOpen] = useState(false);
+
   const location = useLocation();
+  const { logout } = useAuth();
+  const { isUnlocked, isInitialized, lock } = useVaultStore();
 
   const navigation = [
     { name: 'Journal', href: '/journal', icon: BookOpen },
@@ -44,14 +52,12 @@ export function AppShell({
 
   return (
     <div className="min-h-screen flex flex-col bg-canvas text-ink">
+      <VaultIdleWatcher />
+
       <Header
         onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
-        isVaultUnlocked={isVaultUnlocked}
-        statusText={
-          isVaultUnlocked
-            ? 'Vault Unlocked · Encrypted locally'
-            : 'Vault Locked · End-to-End Encrypted'
-        }
+        onOpenSetup={() => setSetupModalOpen(true)}
+        onOpenUnlock={() => setUnlockModalOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -114,27 +120,54 @@ export function AppShell({
           </div>
 
           <div className="p-3 border-t border-border space-y-1">
-            {isVaultUnlocked && onLockVault && (
+            {isUnlocked ? (
+              <>
+                <button
+                  type="button"
+                  onClick={lock}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-ink-muted hover:text-destructive hover:bg-destructive-subtle transition-colors duration-150 cursor-pointer"
+                >
+                  <Lock className="w-4 h-4 stroke-[1.5]" />
+                  <span>Lock Vault</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRotationModalOpen(true)}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-ink-muted hover:text-ink hover:bg-surface-hover transition-colors duration-150 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4 stroke-[1.5]" />
+                  <span>Rotate Passphrase</span>
+                </button>
+              </>
+            ) : isInitialized ? (
               <button
                 type="button"
-                onClick={onLockVault}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-ink-muted hover:text-destructive hover:bg-destructive-subtle transition-colors duration-150 cursor-pointer"
+                onClick={() => setUnlockModalOpen(true)}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-accent hover:bg-accent/10 transition-colors duration-150 cursor-pointer"
+              >
+                <Unlock className="w-4 h-4 stroke-[1.5]" />
+                <span>Unlock Vault</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSetupModalOpen(true)}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-accent hover:bg-accent/10 transition-colors duration-150 cursor-pointer"
               >
                 <Lock className="w-4 h-4 stroke-[1.5]" />
-                <span>Lock Vault</span>
+                <span>Initialize Vault</span>
               </button>
             )}
 
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-ink-subtle hover:text-ink hover:bg-surface-hover transition-colors duration-150 cursor-pointer"
-              >
-                <LogOut className="w-4 h-4 stroke-[1.5]" />
-                <span>Sign Out</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-ink-subtle hover:text-ink hover:bg-surface-hover transition-colors duration-150 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 stroke-[1.5]" />
+              <span>Sign Out</span>
+            </button>
           </div>
         </aside>
 
@@ -143,6 +176,22 @@ export function AppShell({
           <div className="max-w-[68ch] mx-auto px-6 py-8 md:py-12">{children}</div>
         </main>
       </div>
+
+      {/* Vault Modals */}
+      <VaultSetupModal isOpen={setupModalOpen} onClose={() => setSetupModalOpen(false)} />
+
+      <VaultUnlockModal
+        isOpen={unlockModalOpen}
+        onClose={() => setUnlockModalOpen(false)}
+        onOpenRecovery={() => setRecoveryModalOpen(true)}
+      />
+
+      <VaultRecoveryModal isOpen={recoveryModalOpen} onClose={() => setRecoveryModalOpen(false)} />
+
+      <PassphraseRotationModal
+        isOpen={rotationModalOpen}
+        onClose={() => setRotationModalOpen(false)}
+      />
     </div>
   );
 }

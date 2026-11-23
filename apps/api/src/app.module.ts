@@ -7,6 +7,7 @@ import { MailModule } from './mail/mail.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
+import { VaultModule } from './vault/vault.module.js';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SessionsModule } from './sessions/sessions.module.js';
     MailModule,
     AuthModule,
     SessionsModule,
+    VaultModule,
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',

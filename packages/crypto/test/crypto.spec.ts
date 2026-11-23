@@ -4,13 +4,11 @@ import {
   decryptFileBytes,
   derivePassphraseKek,
   deriveRecoveryKek,
-  encodeCrockford,
   encryptEnvelope,
   encryptFileBytes,
   generateDek,
   generateRecoveryKey,
   padPayload,
-  stripJpegExif,
   unpadPayload,
   unwrapDek,
   validateRecoveryKey,
@@ -98,7 +96,9 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
     const wrapAad = 'memoir:v1|dek-wrap|user:user-001';
     const wrappedDek = await wrapDek(dekA, kekCorrect, wrapAad);
 
-    await expect(unwrapDek(wrappedDek.wrappedKey, wrappedDek.nonce, kekWrong, wrapAad)).rejects.toThrow();
+    await expect(
+      unwrapDek(wrappedDek.wrappedKey, wrappedDek.nonce, kekWrong, wrapAad),
+    ).rejects.toThrow();
   });
 
   // --------------------------------------------------------------------------
@@ -107,7 +107,12 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
   it('4. Rejects single-bit tampering across ciphertext body, auth tag, nonce, and AAD', async () => {
     const dek = await generateDek();
     const aad = 'memoir:v1|memory|user:user-001|id:mem-001';
-    const original = await encryptEnvelope('Sensitive diary entry that must not be altered', dek, aad, true);
+    const original = await encryptEnvelope(
+      'Sensitive diary entry that must not be altered',
+      dek,
+      aad,
+      true,
+    );
 
     // Helper to flip the least significant bit of the first byte of a base64url string
     const flipBit = (b64url: string): string => {
@@ -176,11 +181,15 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
 
     // Nonce shorter than 12 bytes
     const shortNonce = { ...valid, nonce: bytesToBase64Url(new Uint8Array(8)) };
-    await expect(decryptEnvelope(shortNonce, dek, aad, false)).rejects.toThrow('Invalid nonce length');
+    await expect(decryptEnvelope(shortNonce, dek, aad, false)).rejects.toThrow(
+      'Invalid nonce length',
+    );
 
     // Nonce longer than 12 bytes
     const longNonce = { ...valid, nonce: bytesToBase64Url(new Uint8Array(16)) };
-    await expect(decryptEnvelope(longNonce, dek, aad, false)).rejects.toThrow('Invalid nonce length');
+    await expect(decryptEnvelope(longNonce, dek, aad, false)).rejects.toThrow(
+      'Invalid nonce length',
+    );
   });
 
   // --------------------------------------------------------------------------
@@ -270,13 +279,20 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
 
     // Test that unwrapped DEK decrypts memory encrypted with original DEK
     const memAad = 'memoir:v1|memory|user:user-001|id:mem-001';
-    const encrypted = await encryptEnvelope('Secret saved before vault recovery', dek, memAad, true);
+    const encrypted = await encryptEnvelope(
+      'Secret saved before vault recovery',
+      dek,
+      memAad,
+      true,
+    );
     const decrypted = await decryptEnvelope(encrypted, unwrapped, memAad, true);
     expect(bytesToUtf8(decrypted)).toBe('Secret saved before vault recovery');
 
     // 4. Test checksum tamper detection
     // Corrupt the last character (the checksum)
-    const corruptedKey = recoveryResult.formattedKey.slice(0, -1) + (recoveryResult.formattedKey.endsWith('9') ? '8' : '9');
+    const corruptedKey =
+      recoveryResult.formattedKey.slice(0, -1) +
+      (recoveryResult.formattedKey.endsWith('9') ? '8' : '9');
     const corruptedValidation = validateRecoveryKey(corruptedKey);
     expect(corruptedValidation.isValid).toBe(false);
   });
@@ -301,23 +317,60 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
     const wrappedOld = await wrapDek(dek, oldKek, wrapAad);
 
     // 2. Encrypt three distinct memory entries with DEK
-    const m1 = await encryptEnvelope('Memory 1 created under old passphrase', dek, 'memoir:v1|memory|user:user-001|id:1', true);
-    const m2 = await encryptEnvelope('Memory 2 created under old passphrase', dek, 'memoir:v1|memory|user:user-001|id:2', true);
-    const m3 = await encryptEnvelope('Memory 3 created under old passphrase', dek, 'memoir:v1|memory|user:user-001|id:3', true);
+    const m1 = await encryptEnvelope(
+      'Memory 1 created under old passphrase',
+      dek,
+      'memoir:v1|memory|user:user-001|id:1',
+      true,
+    );
+    const m2 = await encryptEnvelope(
+      'Memory 2 created under old passphrase',
+      dek,
+      'memoir:v1|memory|user:user-001|id:2',
+      true,
+    );
+    const m3 = await encryptEnvelope(
+      'Memory 3 created under old passphrase',
+      dek,
+      'memoir:v1|memory|user:user-001|id:3',
+      true,
+    );
 
     // 3. User rotates passphrase: unwrap DEK in RAM with old KEK, re-wrap under new KEK
-    const unwrappedInRam = await unwrapDek(wrappedOld.wrappedKey, wrappedOld.nonce, oldKek, wrapAad);
+    const unwrappedInRam = await unwrapDek(
+      wrappedOld.wrappedKey,
+      wrappedOld.nonce,
+      oldKek,
+      wrapAad,
+    );
     const wrappedNew = await wrapDek(unwrappedInRam, newKek, wrapAad);
 
     // 4. Old passphrase must fail to unwrap the new wrapped DEK
-    await expect(unwrapDek(wrappedNew.wrappedKey, wrappedNew.nonce, oldKek, wrapAad)).rejects.toThrow();
+    await expect(
+      unwrapDek(wrappedNew.wrappedKey, wrappedNew.nonce, oldKek, wrapAad),
+    ).rejects.toThrow();
 
     // 5. New passphrase unwraps DEK and decrypts all three original memories with ZERO re-encryption
     const restoredDek = await unwrapDek(wrappedNew.wrappedKey, wrappedNew.nonce, newKek, wrapAad);
 
-    const dec1 = await decryptEnvelope(m1, restoredDek, 'memoir:v1|memory|user:user-001|id:1', true);
-    const dec2 = await decryptEnvelope(m2, restoredDek, 'memoir:v1|memory|user:user-001|id:2', true);
-    const dec3 = await decryptEnvelope(m3, restoredDek, 'memoir:v1|memory|user:user-001|id:3', true);
+    const dec1 = await decryptEnvelope(
+      m1,
+      restoredDek,
+      'memoir:v1|memory|user:user-001|id:1',
+      true,
+    );
+    const dec2 = await decryptEnvelope(
+      m2,
+      restoredDek,
+      'memoir:v1|memory|user:user-001|id:2',
+      true,
+    );
+    const dec3 = await decryptEnvelope(
+      m3,
+      restoredDek,
+      'memoir:v1|memory|user:user-001|id:3',
+      true,
+    );
 
     expect(bytesToUtf8(dec1)).toBe('Memory 1 created under old passphrase');
     expect(bytesToUtf8(dec2)).toBe('Memory 2 created under old passphrase');
@@ -335,7 +388,13 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
     // 64 KB of arbitrary binary data (simulating a photo or audio note)
     const rawBinary = crypto.getRandomValues(new Uint8Array(64 * 1024));
 
-    const encResult = await encryptFileBytes(rawBinary, dek, attachmentId, userId, 'application/octet-stream');
+    const encResult = await encryptFileBytes(
+      rawBinary,
+      dek,
+      attachmentId,
+      userId,
+      'application/octet-stream',
+    );
     expect(encResult.fileCiphertextBytes.length).toBeGreaterThan(rawBinary.length);
     expect(encResult.fileNonce).toBeDefined();
     expect(encResult.wrappedFileKey).toBeDefined();
@@ -381,7 +440,13 @@ describe('Memoir Cryptographic Verification Suite (13 Core Invariants)', () => {
     expect(rawString).toContain('CAMERA:SonyA7IV_GPS:37.7749,-122.4194');
 
     // 2. Encrypt JPEG file bytes (encryptFileBytes automatically invokes stripJpegExif for JPEGs)
-    const encrypted = await encryptFileBytes(rawJpegWithExif, dek, attachmentId, userId, 'image/jpeg');
+    const encrypted = await encryptFileBytes(
+      rawJpegWithExif,
+      dek,
+      attachmentId,
+      userId,
+      'image/jpeg',
+    );
 
     // 3. Decrypt and verify that the decrypted image has had EXIF stripped completely
     const decrypted = await decryptFileBytes(
