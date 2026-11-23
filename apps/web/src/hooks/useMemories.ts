@@ -183,3 +183,16 @@ export function useToggleArchive() {
     },
   });
 }
+
+export function useRestoreMemory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.post(`/api/v1/memories/${id}/restore`);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memories'] });
+    },
+  });
+}

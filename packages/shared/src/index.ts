@@ -237,19 +237,7 @@ export interface MemoryItemResponse {
   updatedAt: string;
 }
 
-export interface DecryptedMemory {
-  id: string;
-  userId: string;
-  entryDate: string;
-  isPinned: boolean;
-  isTimeCapsule: boolean;
-  unlockAt: string | null;
-  envelopeVersion: number;
-  algorithm: string;
-  isLockedTimeCapsule?: boolean;
-  archivedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
+export interface DecryptedMemory extends MemoryItemResponse {
   // Decrypted contents:
   title: string;
   bodyMarkdown: string;
