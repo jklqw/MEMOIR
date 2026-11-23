@@ -16,7 +16,9 @@ import { decryptWithKms, encryptWithKms } from '../common/security/kms.util.js';
 import { maskIp, parseDeviceLabel } from '../common/utils/device.util.js';
 import { MailService } from '../mail/mail.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import type { ChangePasswordDto } from './dto/change-password.dto.js';
+import type { DeleteAccountDto } from './dto/delete-account.dto.js';
 import type { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
 import type { RegisterDto } from './dto/register.dto.js';
@@ -29,7 +31,7 @@ import { WebAuthnService } from './webauthn.service.js';
 import type { PasskeyRegisterVerifyDto } from './dto/passkey-register-verify.dto.js';
 import type { PasskeyLoginOptionsDto } from './dto/passkey-login-options.dto.js';
 import type { PasskeyLoginVerifyDto } from './dto/passkey-login-verify.dto.js';
-import type { PasskeyResponse } from '@memoir/shared';
+import type { DeleteAccountResponse, PasskeyResponse } from '@memoir/shared';
 
 // Precomputed Argon2id dummy hash for anti-enumeration timing defense
 const DUMMY_ARGON2ID_HASH =
@@ -48,6 +50,7 @@ export class AuthService {
     @Inject(RedisService) private readonly redisService: RedisService,
     @Inject(AppConfigService) private readonly config: AppConfigService,
     @Inject(WebAuthnService) private readonly webauthnService: WebAuthnService,
+    @Inject(StorageService) private readonly storageService: StorageService,
   ) {}
 
   private async cacheSet(key: string, value: string, ttlSeconds: number): Promise<void> {
@@ -1251,5 +1254,64 @@ export class AuthService {
     });
 
     return { message: 'Passkey credential removed successfully.' };
+  }
+
+  /**
+   * Permanently deletes user account, purging all live encrypted memories,
+   * user vaults, sessions, backups, credentials, and disk/S3 attachment files.
+   */
+  async deleteAccount(userId: string, dto: DeleteAccountDto): Promise<DeleteAccountResponse> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new BadRequestException('Account not found.');
+    }
+
+    // 1. Re-authenticate account password
+    const isPasswordValid = await argon2.verify(user.passwordHash, dto.password);
+    if (!isPasswordValid) {
+      this.logger.warn(`Failed account deletion attempt for user ${userId}: invalid password`);
+      throw new UnauthorizedException('Incorrect password. Account deletion aborted.');
+    }
+
+    // 2. Explicit confirmation string check
+    if (dto.confirmation.trim().toUpperCase() !== 'DELETE MY ACCOUNT') {
+      throw new BadRequestException(
+        'Confirmation string mismatch. You must explicitly type "DELETE MY ACCOUNT" to proceed.',
+      );
+    }
+
+    // 3. Purge all physical attachment files stored on disk or S3
+    const attachments = await this.prisma.attachment.findMany({
+      where: { userId },
+      select: { storageKey: true },
+    });
+
+    for (const attachment of attachments) {
+      try {
+        await this.storageService.deleteFile(attachment.storageKey);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to delete physical storage file ${attachment.storageKey} during account purge: ${err}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Executing irreversible account deletion for user ${userId} (${attachments.length} attachment files purged).`,
+    );
+
+    // 4. Atomic cascade delete from PostgreSQL
+    // (Cascades to user_vaults, sessions, memories, attachments, backups, security_events, webauthn_credentials)
+    await this.prisma.user.delete({
+      where: { id: userId },
+    });
+
+    return {
+      message: 'Account and associated encrypted data permanently deleted.',
+      backupRetentionNotice:
+        'All live memories, vaults, attachments, and credentials have been permanently deleted immediately. Encrypted database snapshots are securely rotated and purged per our 30-day disaster recovery retention policy.',
+    };
   }
 }

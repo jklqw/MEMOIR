@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell.js';
 import { ProtectedRoute } from './components/layout/ProtectedRoute.js';
 import { Button } from './components/ui/Button.js';
+import { ErrorBoundary } from './components/ui/ErrorBoundary.js';
 import { AuthProvider } from './context/AuthContext.js';
 import { CalendarPage } from './pages/CalendarPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
@@ -44,101 +45,103 @@ function NotFoundPage() {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <ErrorBoundary>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-            {/* Protected Archival Routes */}
-            <Route
-              path="/journal"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <JournalPage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/timeline"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <TimelinePage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/calendar"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <CalendarPage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/capsules"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <TimelinePage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/vault"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <VaultPage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/insights"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <InsightsPage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/security"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <SecurityPage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <ProtectedRoute>
-                  <AppShell>
-                    <SettingsPage />
-                  </AppShell>
-                </ProtectedRoute>
-              }
-            />
+              {/* Protected Archival Routes */}
+              <Route
+                path="/journal"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <JournalPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/timeline"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <TimelinePage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/calendar"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <CalendarPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/capsules"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <TimelinePage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/vault"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <VaultPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/insights"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <InsightsPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/security"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <SecurityPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute>
+                    <AppShell>
+                      <SettingsPage />
+                    </AppShell>
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </ErrorBoundary>
     </QueryClientProvider>
   );
 }

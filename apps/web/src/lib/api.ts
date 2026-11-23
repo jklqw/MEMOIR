@@ -97,8 +97,12 @@ export const api = {
       ...options,
     }),
 
-  delete: <T>(endpoint: string, options?: RequestInit) =>
-    request<T>(endpoint, { method: 'DELETE', ...options }),
+  delete: <T>(endpoint: string, body?: unknown, options?: RequestInit) =>
+    request<T>(endpoint, {
+      method: 'DELETE',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...options,
+    }),
 
   getBlob: async (endpoint: string): Promise<Uint8Array> => {
     const url = endpoint.startsWith('/') ? endpoint : `/api/v1/${endpoint}`;

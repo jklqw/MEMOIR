@@ -79,9 +79,7 @@ describe('Security Regression Suite — Uploads, Envelopes & Path Traversal Defe
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.error?.message).toMatch(
-        /(cannot be empty|should not be empty|isNotEmpty)/i,
-      );
+      expect(res.body.error?.message).toMatch(/(cannot be empty|should not be empty|isNotEmpty)/i);
     });
   });
 
@@ -204,7 +202,9 @@ describe('Security Regression Suite — Uploads, Envelopes & Path Traversal Defe
 
       expect(downloadRes.status).toBe(200);
       expect(downloadRes.headers['content-type']).toBe('application/octet-stream');
-      expect(downloadRes.headers['content-disposition']).toBe('attachment; filename="encrypted.bin"');
+      expect(downloadRes.headers['content-disposition']).toBe(
+        'attachment; filename="encrypted.bin"',
+      );
       expect(downloadRes.headers['x-content-type-options']).toBe('nosniff');
       expect(downloadRes.headers['cache-control']).toContain('no-store');
       expect(downloadRes.headers['cache-control']).toContain('no-cache');

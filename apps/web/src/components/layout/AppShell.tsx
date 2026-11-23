@@ -22,6 +22,8 @@ import { VaultIdleWatcher } from '../vault/VaultIdleWatcher.js';
 import { VaultRecoveryModal } from '../vault/VaultRecoveryModal.js';
 import { VaultSetupModal } from '../vault/VaultSetupModal.js';
 import { VaultUnlockModal } from '../vault/VaultUnlockModal.js';
+import { CommandPalette } from '../ui/CommandPalette.js';
+import { NetworkStatusIndicator } from '../ui/NetworkStatusIndicator.js';
 import { Header } from './Header.js';
 
 export interface AppShellProps {
@@ -39,6 +41,16 @@ export function AppShell({ children }: AppShellProps) {
   const { logout } = useAuth();
   const { isUnlocked, isInitialized, lock } = useVaultStore();
 
+  React.useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && sidebarOpen) {
+        setSidebarOpen(false);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen]);
+
   const navigation = [
     { name: 'Journal', href: '/journal', icon: BookOpen },
     { name: 'Timeline', href: '/timeline', icon: Archive },
@@ -52,6 +64,15 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="min-h-screen flex flex-col bg-canvas text-ink">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2 focus:bg-accent focus:text-accent-ink focus:rounded-md focus:shadow-md focus:outline-none focus:ring-2 focus:ring-accent font-medium text-xs"
+      >
+        Skip to main content
+      </a>
+
+      <NetworkStatusIndicator />
+
       <VaultIdleWatcher />
 
       <Header
@@ -172,10 +193,18 @@ export function AppShell({ children }: AppShellProps) {
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          role="main"
+          className="flex-1 overflow-y-auto focus:outline-none"
+        >
           <div className="max-w-[68ch] mx-auto px-6 py-8 md:py-12">{children}</div>
         </main>
       </div>
+
+      {/* Global Command Palette (Cmd+K / Ctrl+K) */}
+      <CommandPalette />
 
       {/* Vault Modals */}
       <VaultSetupModal isOpen={setupModalOpen} onClose={() => setSetupModalOpen(false)} />

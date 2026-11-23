@@ -104,6 +104,17 @@ export const ChangePasswordSchema = z.object({
 });
 export type ChangePasswordDto = z.infer<typeof ChangePasswordSchema>;
 
+export const DeleteAccountSchema = z.object({
+  password: z.string().min(1, 'Password is required'),
+  confirmation: z.string().min(1, 'Confirmation string is required'),
+});
+export type DeleteAccountDto = z.infer<typeof DeleteAccountSchema>;
+
+export interface DeleteAccountResponse {
+  message: string;
+  backupRetentionNotice: string;
+}
+
 /**
  * Vault DTO Schemas
  */

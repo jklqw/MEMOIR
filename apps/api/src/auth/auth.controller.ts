@@ -22,6 +22,7 @@ import { CSRF_COOKIE_NAME } from '../common/guards/csrf.guard.js';
 import { AuthService } from './auth.service.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { DeleteAccountDto } from './dto/delete-account.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { PasskeyLoginOptionsDto } from './dto/passkey-login-options.dto.js';
@@ -428,5 +429,37 @@ export class AuthController {
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Passkey not found.' })
   async deletePasskey(@CurrentUser('id') userId: string, @Param('id') passkeyId: string) {
     return this.authService.deletePasskey(userId, passkeyId);
+  }
+
+  @Delete('account')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Permanently delete user account and encrypted data',
+    description:
+      'Requires recent re-authentication with current password and explicit confirmation phrase. Purges all user records and private storage blobs, clearing session cookies and returning honest retention notice.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Account and associated data permanently purged.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Current password verification failed.',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Confirmation string mismatch or account not found.',
+  })
+  async deleteAccount(
+    @CurrentUser('id') userId: string,
+    @Body() dto: DeleteAccountDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.deleteAccount(userId, dto);
+    response.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    response.clearCookie(CSRF_COOKIE_NAME, { path: '/' });
+    return result;
   }
 }

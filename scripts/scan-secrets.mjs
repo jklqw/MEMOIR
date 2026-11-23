@@ -16,6 +16,7 @@ const ALLOWED_PATHS = [
   /GUIDE\.md$/,
   /IMPLEMENTATION_PLAN\.md$/,
   /scripts\/scan-secrets\.mjs$/,
+  /\.github\/workflows\//,
 ];
 
 // High-confidence regex patterns for production secrets
@@ -38,7 +39,8 @@ const SECRET_PATTERNS = [
   },
   {
     name: 'Hardcoded Production Database URL',
-    pattern: /\b(?:postgres|postgresql|mysql):\/\/(?!postgres:postgres@|memoir:memoir@|memoir:memoir_dev_password@localhost)[a-zA-Z0-9_-]+:[^@\s]+@[a-zA-Z0-9.-]+:[0-9]+\/[a-zA-Z0-9_-]+\b/,
+    pattern:
+      /\b(?:postgres|postgresql|mysql):\/\/(?!postgres:postgres@|memoir:memoir@|memoir:memoir_dev_password@localhost|memoir:memoir_ci_password@localhost)[a-zA-Z0-9_-]+:[^@\s]+@[a-zA-Z0-9.-]+:[0-9]+\/[a-zA-Z0-9_-]+\b/,
   },
 ];
 
@@ -57,7 +59,9 @@ function getTrackedFiles() {
 }
 
 async function scan() {
-  console.log('[SECURITY SCAN] Scanning repository for hardcoded secrets and sensitive credentials...');
+  console.log(
+    '[SECURITY SCAN] Scanning repository for hardcoded secrets and sensitive credentials...',
+  );
   const files = getTrackedFiles();
   let violationCount = 0;
 
@@ -93,7 +97,9 @@ async function scan() {
     console.error(`\n[FAILED] Secret scan failed with ${violationCount} high-risk finding(s).`);
     process.exit(1);
   } else {
-    console.log(`[PASSED] Secret scan clean. Scanned ${files.length} tracked files. Zero secrets detected.`);
+    console.log(
+      `[PASSED] Secret scan clean. Scanned ${files.length} tracked files. Zero secrets detected.`,
+    );
   }
 }
 

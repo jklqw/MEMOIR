@@ -26,6 +26,7 @@ import { decryptMemory } from '../services/memoryCryptoService.js';
 import { Button } from '../components/ui/Button.js';
 import { Dialog } from '../components/ui/Dialog.js';
 import { Input } from '../components/ui/Input.js';
+import { DeleteAccountModal } from '../components/auth/DeleteAccountModal.js';
 import { PassphraseRotationModal } from '../components/vault/PassphraseRotationModal.js';
 
 export function SettingsPage() {
@@ -33,6 +34,8 @@ export function SettingsPage() {
   const { dek, isUnlocked } = useVaultStore();
 
   const [isRotationOpen, setIsRotationOpen] = useState(false);
+  const [isDeleteAccountOpen, setIsDeleteAccountOpen] = useState(false);
+
   const [isPlaintextModalOpen, setIsPlaintextModalOpen] = useState(false);
   const [plaintextConfirmText, setPlaintextConfirmText] = useState('');
   const [isExportingPlaintext, setIsExportingPlaintext] = useState(false);
@@ -504,13 +507,24 @@ export function SettingsPage() {
           Permanent removal of account identity, encrypted memories, and private files. This action
           cannot be undone.
         </p>
-        <Button variant="destructive" size="sm">
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setIsDeleteAccountOpen(true)}
+          className="cursor-pointer"
+        >
           Delete Memoir Account
         </Button>
       </div>
 
       {/* Passphrase Rotation Modal */}
       <PassphraseRotationModal isOpen={isRotationOpen} onClose={() => setIsRotationOpen(false)} />
+
+      {/* Delete Account Modal */}
+      <DeleteAccountModal
+        isOpen={isDeleteAccountOpen}
+        onClose={() => setIsDeleteAccountOpen(false)}
+      />
 
       {/* Warning-Gated Plaintext Export Modal */}
       <Dialog

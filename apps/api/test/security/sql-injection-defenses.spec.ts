@@ -74,7 +74,8 @@ describe('Security Regression Suite — SQL & Parameter Injection Defenses', () 
     });
 
     it('safely handles UNION-based injection payloads in audit event queries', async () => {
-      const unionPayload = "' UNION SELECT id, email, password_hash, NULL, NULL, NULL FROM users --";
+      const unionPayload =
+        "' UNION SELECT id, email, password_hash, NULL, NULL, NULL FROM users --";
 
       const res = await request(app.getHttpServer())
         .get(`/api/v1/audit/events?eventType=${encodeURIComponent(unionPayload)}`)
@@ -96,7 +97,7 @@ describe('Security Regression Suite — SQL & Parameter Injection Defenses', () 
         "' OR '1'='1'",
         "'; DROP TABLE users; --",
         "12345678-1234-1234-1234-123456789abc' OR '1'='1",
-        "../../etc/passwd",
+        '../../etc/passwd',
       ];
 
       for (const payload of pathPayloads) {

@@ -148,7 +148,9 @@ describe('Security Regression Suite — Rate Limiting, Account Lockout & Session
         .send({ email: replayEmail, password: replayPassword });
 
       const loginCookies = (loginRes.headers['set-cookie'] as unknown as string[]) || [];
-      const sessionCookie1 = loginCookies.find((c) => c.startsWith('memoir_session='))!.split(';')[0]!;
+      const sessionCookie1 = loginCookies
+        .find((c) => c.startsWith('memoir_session='))!
+        .split(';')[0]!;
       const csrfCookie1 = loginCookies.find((c) => c.startsWith('XSRF-TOKEN='))!.split(';')[0]!;
       const csrfToken1 = csrfCookie1.replace('XSRF-TOKEN=', '');
 
@@ -162,7 +164,9 @@ describe('Security Regression Suite — Rate Limiting, Account Lockout & Session
       expect(refreshRes1.status).toBe(200);
 
       const refreshCookies1 = (refreshRes1.headers['set-cookie'] as unknown as string[]) || [];
-      const sessionCookie2 = refreshCookies1.find((c) => c.startsWith('memoir_session='))!.split(';')[0]!;
+      const sessionCookie2 = refreshCookies1
+        .find((c) => c.startsWith('memoir_session='))!
+        .split(';')[0]!;
       const csrfCookie2 = refreshCookies1.find((c) => c.startsWith('XSRF-TOKEN='))!.split(';')[0]!;
       const csrfToken2 = csrfCookie2.replace('XSRF-TOKEN=', '');
       expect(sessionCookie2).not.toBe(sessionCookie1);
