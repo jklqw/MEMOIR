@@ -133,4 +133,43 @@ describe('Encrypted Attachments Module & Secure Binary Download Integration', ()
       NotFoundException,
     );
   });
+
+  it('4. Filters standalone Private Vault items (isVaultItem: true) separately from memory attachments', async () => {
+    const vaultItemId = crypto.randomUUID();
+    const memoryAttachmentId = crypto.randomUUID();
+
+    // Create standalone Private Vault item
+    await attachmentsService.create(userAId, {
+      id: vaultItemId,
+      isVaultItem: true,
+      wrappedFileKey: 'vault-item-key',
+      fileKeyNonce: 'vault-item-nonce',
+      encryptedMetadata: 'vault-item-meta',
+      metaNonce: 'vault-item-meta-nonce',
+      fileNonce: 'vault-item-file-nonce',
+      ciphertext: crypto.randomBytes(512).toString('base64url'),
+    });
+
+    // Create memory attachment
+    await attachmentsService.create(userAId, {
+      id: memoryAttachmentId,
+      isVaultItem: false,
+      wrappedFileKey: 'mem-item-key',
+      fileKeyNonce: 'mem-item-nonce',
+      encryptedMetadata: 'mem-item-meta',
+      metaNonce: 'mem-item-meta-nonce',
+      fileNonce: 'mem-item-file-nonce',
+      ciphertext: crypto.randomBytes(512).toString('base64url'),
+    });
+
+    // Filter by isVaultItem: true -> should only return vaultItemId
+    const vaultItems = await attachmentsService.findAll(userAId, { isVaultItem: true });
+    expect(vaultItems.some((a) => a.id === vaultItemId)).toBe(true);
+    expect(vaultItems.some((a) => a.id === memoryAttachmentId)).toBe(false);
+
+    // Filter by isVaultItem: false -> should only return memoryAttachmentId
+    const memoryAttachments = await attachmentsService.findAll(userAId, { isVaultItem: false });
+    expect(memoryAttachments.some((a) => a.id === memoryAttachmentId)).toBe(true);
+    expect(memoryAttachments.some((a) => a.id === vaultItemId)).toBe(false);
+  });
 });

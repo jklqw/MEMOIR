@@ -305,4 +305,3 @@ export interface StorageQuotaResponse {
   quotaBytes: number;
   percentage: number;
 }
-

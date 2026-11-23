@@ -1,13 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  Download,
-  File,
-  FileText,
-  Image as ImageIcon,
-  Loader2,
-  Lock,
-  Trash2,
-} from 'lucide-react';
+import { Download, File, FileText, Image as ImageIcon, Loader2, Lock, Trash2 } from 'lucide-react';
 import type { DecryptedAttachment } from '@memoir/shared';
 import { useAuth } from '../../context/AuthContext.js';
 import { useDeleteAttachment } from '../../hooks/useAttachments.js';

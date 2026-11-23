@@ -163,6 +163,9 @@ export async function decryptAttachmentMetadata(
   };
   const decryptedBytes = await decryptEnvelope(envelope, dek, aad, false);
   const jsonStr = new TextDecoder().decode(decryptedBytes);
-  return JSON.parse(jsonStr) as { originalFilename: string; mimeType: string; originalSize: number };
+  return JSON.parse(jsonStr) as {
+    originalFilename: string;
+    mimeType: string;
+    originalSize: number;
+  };
 }
-
