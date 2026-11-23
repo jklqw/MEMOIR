@@ -19,8 +19,14 @@ import type { Request, Response } from 'express';
 import { CSRF_COOKIE_NAME } from '../common/guards/csrf.guard.js';
 import { AuthService } from './auth.service.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { TotpDisableDto } from './dto/totp-disable.dto.js';
+import { TotpEnableDto } from './dto/totp-enable.dto.js';
+import { TotpVerifyDto } from './dto/totp-verify.dto.js';
 import { VerifyEmailDto } from './dto/verify-email.dto.js';
 import { AuthGuard, SESSION_COOKIE_NAME } from './guards/auth.guard.js';
 
@@ -93,9 +99,9 @@ export class AuthController {
   @ApiOperation({
     summary: 'Authenticate account credentials',
     description:
-      'Authenticates email and password, checks account lockout, and issues an opaque HttpOnly cookie session.',
+      'Authenticates email and password, checks account lockout, and issues an opaque HttpOnly cookie session or returns MFA challenge.',
   })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Logged in successfully.' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Logged in successfully or MFA challenged.' })
   @ApiResponse({
     status: HttpStatus.UNAUTHORIZED,
     description: 'Invalid credentials or account locked.',
@@ -106,11 +112,163 @@ export class AuthController {
     @Ip() ip: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const { user, rawToken } = await this.authService.login(dto, userAgent, ip);
-    response.cookie(SESSION_COOKIE_NAME, rawToken, COOKIE_OPTIONS);
+    const result = await this.authService.login(dto, userAgent, ip);
+    if ('mfaRequired' in result) {
+      return result;
+    }
+    response.cookie(SESSION_COOKIE_NAME, result.rawToken, COOKIE_OPTIONS);
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    response.cookie(CSRF_COOKIE_NAME, csrfToken, CSRF_COOKIE_OPTIONS);
+    return { user: result.user, csrfToken };
+  }
+
+  @Post('2fa/setup')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Initiate TOTP two-factor authentication setup',
+    description:
+      'Generates a secret key, otpauth QR code data URL, and 10 single-use recovery backup codes.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'TOTP setup payload generated.' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required.' })
+  async setup2Fa(@CurrentUser('id') userId: string) {
+    return this.authService.setup2Fa(userId);
+  }
+
+  @Post('2fa/enable')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirm and activate TOTP two-factor authentication',
+    description:
+      'Validates enrollment code, KMS-encrypts secret, hashes backup codes, and activates 2FA.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Two-factor authentication enabled successfully.',
+  })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid code or expired session.' })
+  async enable2Fa(@CurrentUser('id') userId: string, @Body() dto: TotpEnableDto) {
+    return this.authService.enable2Fa(userId, dto.token);
+  }
+
+  @Post('2fa/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify two-factor authentication challenge during login or session check',
+    description:
+      'Validates 6-digit TOTP code or single-use backup code. Establishes session on success.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Two-factor authentication verified successfully.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Invalid code or challenge token.',
+  })
+  async verify2Fa(
+    @Body() dto: TotpVerifyDto,
+    @Req() request: Request,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Ip() ip: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const rawToken = (request.cookies as Record<string, string | undefined> | undefined)?.[
+      SESSION_COOKIE_NAME
+    ];
+    let currentUserId: string | undefined;
+    if (rawToken) {
+      try {
+        const tokenHash = this.authService.hashToken(rawToken.trim());
+        const session = await this.authService['prisma'].session.findUnique({
+          where: { tokenHash },
+          select: { userId: true, revokedAt: true, expiresAt: true },
+        });
+        if (session && !session.revokedAt && session.expiresAt > new Date()) {
+          currentUserId = session.userId;
+        }
+      } catch {
+        // Ignored
+      }
+    }
+
+    const { user, rawToken: newSessionToken } = await this.authService.verify2Fa(
+      dto,
+      currentUserId,
+      userAgent,
+      ip,
+    );
+    response.cookie(SESSION_COOKIE_NAME, newSessionToken, COOKIE_OPTIONS);
     const csrfToken = crypto.randomBytes(32).toString('hex');
     response.cookie(CSRF_COOKIE_NAME, csrfToken, CSRF_COOKIE_OPTIONS);
     return { user, csrfToken };
+  }
+
+  @Post('2fa/disable')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Disable two-factor authentication',
+    description:
+      'Requires current account password re-authentication and valid TOTP or backup code.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Two-factor authentication disabled successfully.',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Invalid password or verification code.',
+  })
+  async disable2Fa(@CurrentUser('id') userId: string, @Body() dto: TotpDisableDto) {
+    return this.authService.disable2Fa(userId, dto);
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard)
+  @ApiCookieAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Change account authentication password',
+    description:
+      'Re-authenticates current password and updates to a new Argon2id password hash. Does not touch user vaults.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Password changed successfully.' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Current password incorrect.' })
+  async changePassword(@CurrentUser('id') userId: string, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(userId, dto);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request account password reset email',
+    description: 'Dispatches password reset link with generic anti-enumeration response semantics.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Password reset email dispatched if account exists.',
+  })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete account password reset',
+    description:
+      'Validates one-time reset token, updates password hash, and revokes sessions. Vault data is strictly preserved.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Password reset successfully.' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid or expired reset token.' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   @Post('refresh')

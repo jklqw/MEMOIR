@@ -1,16 +1,61 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SessionResponse } from '@memoir/shared';
-import { AlertCircle, CheckCircle2, Globe, Laptop, RotateCcw, Shield, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Copy,
+  Globe,
+  KeyRound,
+  Laptop,
+  Lock,
+  QrCode,
+  RotateCcw,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
 import { Button } from '../components/ui/Button.js';
+import { Input } from '../components/ui/Input.js';
+import { useAuth } from '../context/AuthContext.js';
 import { api } from '../lib/api.js';
+
+interface TotpSetupResponse {
+  qrCodeDataUrl: string;
+  secret: string;
+  backupCodes: string[];
+}
 
 export function SecurityPage() {
   const queryClient = useQueryClient();
+  const { user, refreshUser } = useAuth();
   const [actionMessage, setActionMessage] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
+
+  // 2FA Setup State
+  const [setupData, setSetupData] = useState<TotpSetupResponse | null>(null);
+  const [setupCode, setSetupCode] = useState('');
+  const [isStartingSetup, setIsStartingSetup] = useState(false);
+  const [isEnabling2Fa, setIsEnabling2Fa] = useState(false);
+  const [copiedSecret, setCopiedSecret] = useState(false);
+  const [copiedBackupCodes, setCopiedBackupCodes] = useState(false);
+
+  // 2FA Disable State
+  const [isDisabling2FaOpen, setIsDisabling2FaOpen] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
+  const [disableTotpCode, setDisableTotpCode] = useState('');
+  const [isSubmittingDisable, setIsSubmittingDisable] = useState(false);
+
+  // Password Change State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const {
     data: sessions = [],
@@ -49,6 +94,124 @@ export function SecurityPage() {
       });
     },
   });
+
+  // Start 2FA Setup
+  const handleStartSetup = async () => {
+    setActionMessage(null);
+    setIsStartingSetup(true);
+    try {
+      const data = await api.post<TotpSetupResponse>('/api/v1/auth/2fa/setup');
+      setSetupData(data);
+      setSetupCode('');
+    } catch (err: unknown) {
+      setActionMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to initialize 2FA setup.',
+      });
+    } finally {
+      setIsStartingSetup(false);
+    }
+  };
+
+  // Confirm and Enable 2FA
+  const handleConfirmEnable2Fa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!setupCode.trim()) return;
+    setActionMessage(null);
+    setIsEnabling2Fa(true);
+    try {
+      await api.post('/api/v1/auth/2fa/enable', { token: setupCode.trim() });
+      setSetupData(null);
+      setSetupCode('');
+      await refreshUser();
+      setActionMessage({
+        type: 'success',
+        text: 'Two-factor authentication enabled successfully. Your backup codes are active.',
+      });
+    } catch (err: unknown) {
+      setActionMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Invalid 2FA code. Verification failed.',
+      });
+    } finally {
+      setIsEnabling2Fa(false);
+    }
+  };
+
+  // Disable 2FA
+  const handleDisable2Fa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!disablePassword || !disableTotpCode.trim()) return;
+    setActionMessage(null);
+    setIsSubmittingDisable(true);
+    try {
+      await api.post('/api/v1/auth/2fa/disable', {
+        currentPassword,
+        totpCode: disableTotpCode.trim(),
+      });
+      setIsDisabling2FaOpen(false);
+      setDisablePassword('');
+      setDisableTotpCode('');
+      await refreshUser();
+      setActionMessage({
+        type: 'success',
+        text: 'Two-factor authentication disabled successfully.',
+      });
+    } catch (err: unknown) {
+      setActionMessage({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Failed to disable 2FA. Verify your password and TOTP code.',
+      });
+    } finally {
+      setIsSubmittingDisable(false);
+    }
+  };
+
+  // Change Password
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeError(null);
+
+    if (newPassword.length < 10) {
+      setPasswordChangeError('New password must be at least 10 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordChangeError('New password and confirmation do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      await api.post('/api/v1/auth/change-password', {
+        currentPassword,
+        newPassword,
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setActionMessage({
+        type: 'success',
+        text: 'Account password updated successfully. All other sessions have been terminated.',
+      });
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    } catch (err: unknown) {
+      setPasswordChangeError(
+        err instanceof Error ? err.message : 'Failed to update account password.',
+      );
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, onCopied: (val: boolean) => void) => {
+    void navigator.clipboard.writeText(text);
+    onCopied(true);
+    setTimeout(() => onCopied(false), 2000);
+  };
 
   return (
     <div className="space-y-8 max-w-4xl">
@@ -105,6 +268,25 @@ export function SecurityPage() {
               Enforced
             </span>
           </div>
+
+          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
+            <div>
+              <span className="text-ink font-medium block">Two-Factor Authentication (TOTP)</span>
+              <span className="text-[11px] text-ink-muted">
+                KMS AES-256-GCM encrypted secrets, SHA-256 hashed single-use backup codes
+              </span>
+            </div>
+            <span
+              className={`font-mono text-[11px] px-2 py-0.5 rounded ${
+                user?.totpEnabled
+                  ? 'bg-accent/10 text-accent font-semibold'
+                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              }`}
+            >
+              {user?.totpEnabled ? 'Active' : 'Disabled'}
+            </span>
+          </div>
+
           <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
             <div>
               <span className="text-ink font-medium block">Account Password Hash</span>
@@ -116,6 +298,7 @@ export function SecurityPage() {
               Argon2id
             </span>
           </div>
+
           <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
             <div>
               <span className="text-ink font-medium block">Session Security & Rotation</span>
@@ -128,6 +311,335 @@ export function SecurityPage() {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Two-Factor Authentication Management */}
+      <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <QrCode className="w-4 h-4 text-accent stroke-[1.5]" />
+            <span>Two-Factor Authentication (TOTP)</span>
+          </div>
+          {user?.totpEnabled ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Enabled & Protected
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              Not Enabled
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Add an extra cryptographic barrier to your account using Time-based One-Time Passwords
+          (RFC 6238). Authenticators such as Aegis, 1Password, or Google Authenticator are
+          supported. Your TOTP secret is protected at rest with KMS AES-256-GCM envelope encryption.
+        </p>
+
+        {!user?.totpEnabled && !setupData && (
+          <div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void handleStartSetup()}
+              disabled={isStartingSetup}
+            >
+              {isStartingSetup ? 'Initializing Setup...' : 'Setup Two-Factor Authentication'}
+            </Button>
+          </div>
+        )}
+
+        {/* 2FA Enrollment Flow */}
+        {!user?.totpEnabled && setupData && (
+          <div className="mt-4 p-4 bg-paper border border-border rounded-md space-y-4">
+            <div className="border-b border-border pb-3">
+              <h2 className="text-sm font-medium text-ink">Step 1: Scan QR Code or Enter Secret</h2>
+              <p className="text-xs text-ink-muted mt-0.5">
+                Scan this code in your authenticator app, or manually enter the secret key below.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="p-2 bg-white rounded border border-border shadow-xs">
+                <img
+                  src={setupData.qrCodeDataUrl}
+                  alt="Two-Factor QR Code"
+                  className="w-40 h-40 object-contain"
+                />
+              </div>
+              <div className="space-y-3 flex-1 text-xs">
+                <div>
+                  <label className="block text-ink-muted text-[11px] uppercase tracking-wider font-semibold mb-1">
+                    Manual Secret Key
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <code className="p-2 bg-surface border border-border rounded font-mono text-xs select-all text-ink">
+                      {setupData.secret}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard(setupData.secret, setCopiedSecret)}
+                      className="text-xs"
+                    >
+                      {copiedSecret ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-surface border border-border rounded space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-ink text-[11px] uppercase tracking-wider">
+                      Single-Use Backup Codes (10)
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        copyToClipboard(setupData.backupCodes.join('\n'), setCopiedBackupCodes)
+                      }
+                      className="text-xs text-ink-muted"
+                    >
+                      {copiedBackupCodes ? 'Copied!' : 'Copy All'}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-ink-muted">
+                    Save these codes in a secure vault. Each code can be used exactly once if you
+                    lose access to your authenticator app.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5 font-mono text-xs text-ink bg-paper p-2 rounded border border-border">
+                    {setupData.backupCodes.map((c) => (
+                      <span key={c} className="text-center">
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <form
+              onSubmit={handleConfirmEnable2Fa}
+              className="pt-3 border-t border-border space-y-3"
+            >
+              <div className="max-w-xs">
+                <label htmlFor="setupTotpCode" className="block text-xs font-medium text-ink mb-1">
+                  Step 2: Enter 6-digit Authenticator Code
+                </label>
+                <Input
+                  id="setupTotpCode"
+                  type="text"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={setupCode}
+                  onChange={(e) => setSetupCode(e.target.value)}
+                  className="font-mono text-center tracking-widest text-sm"
+                  autoComplete="one-time-code"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={isEnabling2Fa || setupCode.length !== 6}
+                >
+                  {isEnabling2Fa ? 'Verifying...' : 'Activate 2FA'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSetupData(null);
+                    setSetupCode('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* 2FA Disable Option */}
+        {user?.totpEnabled && (
+          <div className="space-y-3">
+            {!isDisabling2FaOpen ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDisabling2FaOpen(true)}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 border-red-200 dark:border-red-900"
+              >
+                Disable Two-Factor Authentication
+              </Button>
+            ) : (
+              <form
+                onSubmit={handleDisable2Fa}
+                className="p-4 bg-paper border border-red-200 dark:border-red-900/60 rounded-md space-y-4"
+              >
+                <div className="text-xs text-red-800 dark:text-red-300 font-medium">
+                  Confirm 2FA Deactivation: Enter your account password and a current TOTP code or
+                  backup code.
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="disablePassword"
+                      className="block text-xs font-medium text-ink mb-1"
+                    >
+                      Account Password
+                    </label>
+                    <Input
+                      id="disablePassword"
+                      type="password"
+                      placeholder="••••••••••••"
+                      value={disablePassword}
+                      onChange={(e) => setDisablePassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="disableTotpCode"
+                      className="block text-xs font-medium text-ink mb-1"
+                    >
+                      TOTP or Backup Code
+                    </label>
+                    <Input
+                      id="disableTotpCode"
+                      type="text"
+                      placeholder="123456 or ABCD-1234"
+                      value={disableTotpCode}
+                      onChange={(e) => setDisableTotpCode(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={isSubmittingDisable || !disablePassword || !disableTotpCode}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {isSubmittingDisable ? 'Disabling...' : 'Confirm Disable 2FA'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setIsDisabling2FaOpen(false);
+                      setDisablePassword('');
+                      setDisableTotpCode('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Account Password & Credential Lifecycle */}
+      <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <KeyRound className="w-4 h-4 text-accent stroke-[1.5]" />
+          <span>Account Password & Credential Lifecycle</span>
+        </div>
+
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Update the password used to authenticate your session with the server.
+        </p>
+
+        <div className="p-3 rounded-md bg-paper border border-border text-[11px] leading-relaxed text-ink-muted flex items-start gap-2">
+          <Lock className="w-4 h-4 text-ink-muted shrink-0 mt-0.5" strokeWidth={1.5} />
+          <span>
+            <strong>Three-Secret Separation:</strong> Changing your account password re-hashes your
+            authentication credential via Argon2id on the server. Your encrypted diary entries,
+            vault keys, and local Vault Passphrase remain completely unchanged.
+          </span>
+        </div>
+
+        {passwordChangeError && (
+          <div
+            role="alert"
+            aria-live="polite"
+            className="p-3 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-xs text-red-800 dark:text-red-300 flex items-center gap-2"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+            <span>{passwordChangeError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
+          <div>
+            <label htmlFor="currentPassword" className="block text-xs font-medium text-ink mb-1">
+              Current Account Password
+            </label>
+            <Input
+              id="currentPassword"
+              type="password"
+              placeholder="••••••••••••"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="newPassword" className="block text-xs font-medium text-ink mb-1">
+              New Account Password
+            </label>
+            <Input
+              id="newPassword"
+              type="password"
+              placeholder="••••••••••••"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+            />
+            <p className="text-[11px] text-ink-muted mt-1">Minimum 10 characters.</p>
+          </div>
+
+          <div>
+            <label htmlFor="confirmPassword" className="block text-xs font-medium text-ink mb-1">
+              Confirm New Password
+            </label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              placeholder="••••••••••••"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </div>
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={isChangingPassword || !currentPassword || !newPassword || !confirmPassword}
+          >
+            {isChangingPassword ? 'Updating Password...' : 'Update Password'}
+          </Button>
+        </form>
       </div>
 
       {/* Active Sessions */}

@@ -7,6 +7,7 @@ export interface AuthUser {
   email: string;
   emailVerifiedAt: string | null;
   accountStatus: string;
+  totpEnabled?: boolean;
   createdAt: string;
 }
 
@@ -14,7 +15,8 @@ interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (credentials: LoginDto) => Promise<void>;
+  login: (credentials: LoginDto) => Promise<{ mfaRequired?: boolean; mfaToken?: string }>;
+  verify2Fa: (data: { mfaToken?: string; code: string }) => Promise<void>;
   register: (credentials: RegisterDto) => Promise<{ message: string }>;
   verifyEmail: (token: string) => Promise<{ message: string }>;
   logout: () => Promise<void>;
@@ -42,10 +44,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void refreshUser();
   }, []);
 
-  const login = async (credentials: LoginDto) => {
+  const login = async (
+    credentials: LoginDto,
+  ): Promise<{ mfaRequired?: boolean; mfaToken?: string }> => {
     setIsLoading(true);
     try {
-      await api.post<{ user: { id: string; email: string } }>('/api/v1/auth/login', credentials);
+      const res = await api.post<{
+        user?: { id: string; email: string };
+        mfaRequired?: boolean;
+        mfaToken?: string;
+      }>('/api/v1/auth/login', credentials);
+
+      if (res.mfaRequired && res.mfaToken) {
+        return { mfaRequired: true, mfaToken: res.mfaToken };
+      }
+      await refreshUser();
+      return {};
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verify2Fa = async (data: { mfaToken?: string; code: string }): Promise<void> => {
+    setIsLoading(true);
+    try {
+      await api.post('/api/v1/auth/2fa/verify', data);
       await refreshUser();
     } finally {
       setIsLoading(false);
@@ -77,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         login,
+        verify2Fa,
         register,
         verifyEmail,
         logout,

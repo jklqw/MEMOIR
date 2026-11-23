@@ -6,13 +6,23 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { SecurityEventType } from '@prisma/client';
+import { Prisma, SecurityEventType } from '@prisma/client';
 import argon2 from 'argon2';
+import { generateSecret, generateURI, verifySync } from 'otplib';
+import QRCode from 'qrcode';
+import { AppConfigService } from '../config/config.service.js';
+import { RedisService } from '../redis/redis.service.js';
+import { decryptWithKms, encryptWithKms } from '../common/security/kms.util.js';
 import { maskIp, parseDeviceLabel } from '../common/utils/device.util.js';
 import { MailService } from '../mail/mail.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { ChangePasswordDto } from './dto/change-password.dto.js';
+import type { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
 import type { RegisterDto } from './dto/register.dto.js';
+import type { ResetPasswordDto } from './dto/reset-password.dto.js';
+import type { TotpDisableDto } from './dto/totp-disable.dto.js';
+import type { TotpVerifyDto } from './dto/totp-verify.dto.js';
 import type { VerifyEmailDto } from './dto/verify-email.dto.js';
 
 // Precomputed Argon2id dummy hash for anti-enumeration timing defense
@@ -23,10 +33,33 @@ const DUMMY_ARGON2ID_HASH =
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  // In-memory fallback if Redis is temporarily unreachable
+  private readonly memoryStore = new Map<string, { value: string; expiresAt: number }>();
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(MailService) private readonly mailService: MailService,
+    @Inject(RedisService) private readonly redisService: RedisService,
+    @Inject(AppConfigService) private readonly config: AppConfigService,
   ) {}
+
+  private async cacheSet(key: string, value: string, ttlSeconds: number): Promise<void> {
+    await this.redisService.set(key, value, ttlSeconds);
+    this.memoryStore.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  private async cacheGet(key: string): Promise<string | null> {
+    const redisVal = await this.redisService.get(key);
+    if (redisVal) return redisVal;
+    const mem = this.memoryStore.get(key);
+    if (mem && mem.expiresAt > Date.now()) return mem.value;
+    return null;
+  }
+
+  private async cacheDel(key: string): Promise<void> {
+    await this.redisService.del(key);
+    this.memoryStore.delete(key);
+  }
 
   /**
    * Hashes the account authentication password server-side with Argon2id.
@@ -64,6 +97,50 @@ export class AuthService {
    */
   hashToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Creates and registers a new authenticated session for a user.
+   */
+  private async createSessionForUser(
+    user: { id: string; email: string },
+    userAgent?: string,
+    ip?: string,
+  ): Promise<{ user: { id: string; email: string }; rawToken: string }> {
+    const rawToken = `memoir_s_${crypto.randomBytes(32).toString('hex')}`;
+    const tokenHash = this.hashToken(rawToken);
+    const familyId = crypto.randomUUID();
+    const { deviceLabel, userAgentSummary } = parseDeviceLabel(userAgent);
+    const ipMasked = maskIp(ip);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        familyId,
+        deviceLabel,
+        userAgentSummary,
+        ipMaskedOrHash: ipMasked,
+        expiresAt,
+      },
+    });
+
+    await this.prisma.securityEvent.create({
+      data: {
+        userId: user.id,
+        eventType: SecurityEventType.LOGIN_SUCCESS,
+        safeMetadata: {
+          deviceLabel,
+          ipMasked,
+        },
+      },
+    });
+
+    return {
+      user: { id: user.id, email: user.email },
+      rawToken,
+    };
   }
 
   /**
@@ -141,7 +218,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new BadRequestException('Invalid or expired email verification link.');
+      throw new BadRequestException('Invalid or expired email verification token.');
     }
 
     await this.prisma.user.update({
@@ -166,13 +243,16 @@ export class AuthService {
   }
 
   /**
-   * Authenticates user credentials, rotates sessions, and issues an opaque cookie session.
+   * Authenticates user credentials, checks account lockout, and either issues session or triggers 2FA challenge.
    */
   async login(
     dto: LoginDto,
     userAgent?: string,
     ip?: string,
-  ): Promise<{ user: { id: string; email: string }; rawToken: string }> {
+  ): Promise<
+    | { user: { id: string; email: string }; rawToken: string }
+    | { mfaRequired: true; mfaToken: string }
+  > {
     const normalizedEmail = dto.email.trim().toLowerCase();
 
     const user = await this.prisma.user.findUnique({
@@ -244,7 +324,7 @@ export class AuthService {
       throw new UnauthorizedException('Please verify your email address before logging in.');
     }
 
-    // Reset failed login attempts on successful login
+    // Reset failed login attempts on successful password verification
     if (user.failedLoginAttempts > 0 || user.lockedUntil) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -255,41 +335,395 @@ export class AuthService {
       });
     }
 
-    // Generate opaque session token & session family
-    const rawToken = `memoir_s_${crypto.randomBytes(32).toString('hex')}`;
-    const tokenHash = this.hashToken(rawToken);
-    const familyId = crypto.randomUUID();
-    const { deviceLabel, userAgentSummary } = parseDeviceLabel(userAgent);
-    const ipMasked = maskIp(ip);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    // Two-factor authentication check if active
+    if (user.totpEnabled) {
+      if (dto.totpCode) {
+        const cleanCode = dto.totpCode.trim().replace(/-/g, '').toLowerCase();
+        const codeHash = this.hashToken(cleanCode);
+        const storedCodes = (
+          Array.isArray(user.totpBackupCodesHash) ? (user.totpBackupCodesHash as string[]) : []
+        ) as string[];
+        const matchIdx = storedCodes.indexOf(codeHash);
+        let codeValid = false;
 
-    await this.prisma.session.create({
+        if (matchIdx !== -1) {
+          codeValid = true;
+          const updatedCodes = [...storedCodes];
+          updatedCodes.splice(matchIdx, 1);
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: { totpBackupCodesHash: updatedCodes },
+          });
+        } else if (user.totpSecretEncrypted) {
+          try {
+            const secret = decryptWithKms(
+              user.totpSecretEncrypted,
+              this.config.get('SERVER_KMS_KEY'),
+            );
+            const verification = verifySync({ token: dto.totpCode.trim(), secret });
+            if (verification && verification.valid) {
+              codeValid = true;
+            }
+          } catch {
+            codeValid = false;
+          }
+        }
+
+        if (!codeValid) {
+          await this.prisma.securityEvent.create({
+            data: {
+              userId: user.id,
+              eventType: SecurityEventType.LOGIN_FAILED,
+              safeMetadata: { reason: 'Invalid 2FA code during login', ipMasked: maskIp(ip) },
+            },
+          });
+          throw new UnauthorizedException('Invalid two-factor authentication code.');
+        }
+
+        return this.createSessionForUser(user, userAgent, ip);
+      }
+
+      // 2FA required: issue short-lived challenge token
+      const mfaToken = `mfa_${crypto.randomBytes(32).toString('hex')}`;
+      await this.cacheSet(
+        `memoir:mfa:${mfaToken}`,
+        JSON.stringify({ userId: user.id }),
+        300, // 5 minutes TTL
+      );
+
+      return {
+        mfaRequired: true,
+        mfaToken,
+      };
+    }
+
+    return this.createSessionForUser(user, userAgent, ip);
+  }
+
+  /**
+   * Initiates TOTP 2FA setup by generating a secret, QR code, and 10 single-use backup codes.
+   */
+  async setup2Fa(
+    userId: string,
+  ): Promise<{ secret: string; qrCodeUrl: string; backupCodes: string[] }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('User not found.');
+    }
+
+    const secret = generateSecret();
+    const uri = generateURI({ secret, label: user.email, issuer: 'Memoir' });
+    const qrCodeUrl = await QRCode.toDataURL(uri);
+
+    const backupCodes: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const hex = crypto.randomBytes(4).toString('hex').toUpperCase();
+      backupCodes.push(`${hex.slice(0, 4)}-${hex.slice(4, 8)}`);
+    }
+
+    await this.cacheSet(
+      `memoir:2fa:setup:${user.id}`,
+      JSON.stringify({ secret, backupCodes }),
+      600, // 10 minutes TTL
+    );
+
+    return { secret, qrCodeUrl, backupCodes };
+  }
+
+  /**
+   * Activates TOTP 2FA by verifying the enrollment token and encrypting the secret with SERVER_KMS_KEY.
+   */
+  async enable2Fa(userId: string, token: string): Promise<{ message: string }> {
+    const cached = await this.cacheGet(`memoir:2fa:setup:${userId}`);
+    if (!cached) {
+      throw new BadRequestException('2FA setup session expired. Please begin setup again.');
+    }
+
+    const { secret, backupCodes } = JSON.parse(cached) as { secret: string; backupCodes: string[] };
+    const verification = verifySync({ token: token.trim(), secret });
+    if (!verification || !verification.valid) {
+      throw new BadRequestException('Invalid authentication code.');
+    }
+
+    const hashedBackupCodes = backupCodes.map((code) =>
+      this.hashToken(code.replace(/-/g, '').toLowerCase()),
+    );
+    const encryptedSecret = encryptWithKms(secret, this.config.get('SERVER_KMS_KEY'));
+
+    await this.prisma.user.update({
+      where: { id: userId },
       data: {
-        userId: user.id,
-        tokenHash,
-        familyId,
-        deviceLabel,
-        userAgentSummary,
-        ipMaskedOrHash: ipMasked,
-        expiresAt,
+        totpEnabled: true,
+        totpSecretEncrypted: encryptedSecret,
+        totpBackupCodesHash: hashedBackupCodes,
+      },
+    });
+
+    await this.cacheDel(`memoir:2fa:setup:${userId}`);
+
+    await this.prisma.securityEvent.create({
+      data: {
+        userId,
+        eventType: SecurityEventType.TOTP_ENABLED,
+        safeMetadata: { timestamp: new Date().toISOString() },
+      },
+    });
+
+    return { message: 'Two-factor authentication enabled successfully.' };
+  }
+
+  /**
+   * Verifies a 2FA code during login (via mfaToken challenge) or within an authenticated session.
+   */
+  async verify2Fa(
+    dto: TotpVerifyDto,
+    currentUserId?: string,
+    userAgent?: string,
+    ip?: string,
+  ): Promise<{ user: { id: string; email: string }; rawToken: string }> {
+    let userId = currentUserId;
+
+    if (dto.mfaToken) {
+      const cached = await this.cacheGet(`memoir:mfa:${dto.mfaToken}`);
+      if (!cached) {
+        throw new UnauthorizedException('MFA session expired or invalid. Please log in again.');
+      }
+      const data = JSON.parse(cached) as { userId: string };
+      userId = data.userId;
+    }
+
+    if (!userId) {
+      throw new BadRequestException('MFA challenge token or active session required.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.totpEnabled || !user.totpSecretEncrypted) {
+      throw new BadRequestException('Two-factor authentication is not active on this account.');
+    }
+
+    const cleanCode = dto.code.trim().replace(/-/g, '').toLowerCase();
+    const codeHash = this.hashToken(cleanCode);
+    const storedCodes = (
+      Array.isArray(user.totpBackupCodesHash) ? (user.totpBackupCodesHash as string[]) : []
+    ) as string[];
+    const matchIdx = storedCodes.indexOf(codeHash);
+    let codeValid = false;
+
+    if (matchIdx !== -1) {
+      codeValid = true;
+      const updatedCodes = [...storedCodes];
+      updatedCodes.splice(matchIdx, 1);
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { totpBackupCodesHash: updatedCodes },
+      });
+    } else {
+      try {
+        const secret = decryptWithKms(user.totpSecretEncrypted, this.config.get('SERVER_KMS_KEY'));
+        const verification = verifySync({ token: dto.code.trim(), secret });
+        if (verification && verification.valid) {
+          codeValid = true;
+        }
+      } catch {
+        codeValid = false;
+      }
+    }
+
+    if (!codeValid) {
+      await this.prisma.securityEvent.create({
+        data: {
+          userId: user.id,
+          eventType: SecurityEventType.LOGIN_FAILED,
+          safeMetadata: { reason: 'Invalid 2FA code during verification', ipMasked: maskIp(ip) },
+        },
+      });
+      throw new UnauthorizedException('Invalid two-factor authentication code or backup code.');
+    }
+
+    if (dto.mfaToken) {
+      await this.cacheDel(`memoir:mfa:${dto.mfaToken}`);
+    }
+
+    return this.createSessionForUser(user, userAgent, ip);
+  }
+
+  /**
+   * Disables two-factor authentication requiring account password re-authentication.
+   */
+  async disable2Fa(userId: string, dto: TotpDisableDto): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.totpEnabled || !user.totpSecretEncrypted) {
+      throw new BadRequestException('Two-factor authentication is not currently enabled.');
+    }
+
+    const isPasswordValid = await this.verifyPassword(user.passwordHash, dto.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Current password does not match.');
+    }
+
+    const cleanCode = dto.code.trim().replace(/-/g, '').toLowerCase();
+    const codeHash = this.hashToken(cleanCode);
+    const storedBackupCodes = (
+      Array.isArray(user.totpBackupCodesHash) ? (user.totpBackupCodesHash as string[]) : []
+    ) as string[];
+    const matchIdx = storedBackupCodes.indexOf(codeHash);
+    let codeValid = false;
+
+    if (matchIdx !== -1) {
+      codeValid = true;
+    } else {
+      try {
+        const secret = decryptWithKms(user.totpSecretEncrypted, this.config.get('SERVER_KMS_KEY'));
+        const verification = verifySync({ token: dto.code.trim(), secret });
+        if (verification && verification.valid) {
+          codeValid = true;
+        }
+      } catch {
+        codeValid = false;
+      }
+    }
+
+    if (!codeValid) {
+      throw new UnauthorizedException('Invalid authentication code or backup code.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        totpEnabled: false,
+        totpSecretEncrypted: null,
+        totpBackupCodesHash: Prisma.DbNull,
       },
     });
 
     await this.prisma.securityEvent.create({
       data: {
-        userId: user.id,
-        eventType: SecurityEventType.LOGIN_SUCCESS,
-        safeMetadata: {
-          deviceLabel,
-          ipMasked,
-        },
+        userId,
+        eventType: SecurityEventType.TOTP_DISABLED,
+        safeMetadata: { timestamp: new Date().toISOString() },
       },
     });
 
-    return {
-      user: { id: user.id, email: user.email },
-      rawToken,
+    return { message: 'Two-factor authentication disabled successfully.' };
+  }
+
+  /**
+   * Re-authenticated account password change without affecting user vaults.
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('User not found.');
+    }
+
+    const isPasswordValid = await this.verifyPassword(user.passwordHash, dto.currentPassword);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Current password does not match.');
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('New password must be different from current password.');
+    }
+
+    const newHash = await this.hashPassword(dto.newPassword);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newHash },
+    });
+
+    await this.prisma.securityEvent.create({
+      data: {
+        userId,
+        eventType: SecurityEventType.PASSWORD_CHANGED,
+        safeMetadata: { timestamp: new Date().toISOString() },
+      },
+    });
+
+    return { message: 'Account password changed successfully.' };
+  }
+
+  /**
+   * Initiates account password reset via email dispatch with anti-enumeration protection.
+   */
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    const genericResponse = {
+      message: 'If this email address is registered, a password reset link has been dispatched.',
     };
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email.trim().toLowerCase() },
+    });
+
+    if (!user) {
+      await this.verifyPassword(DUMMY_ARGON2ID_HASH, 'dummy-password');
+      return genericResponse;
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: expiresAt,
+      },
+    });
+
+    await this.mailService.sendPasswordResetEmail(user.email, rawToken);
+
+    return genericResponse;
+  }
+
+  /**
+   * Completes account password reset using a one-time token.
+   * Strictly isolates password reset from user vaults: user_vaults is completely unaffected.
+   */
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    const tokenHash = this.hashToken(dto.token.trim());
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired password reset token.');
+    }
+
+    const newPasswordHash = await this.hashPassword(dto.newPassword);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: newPasswordHash,
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    // Revoke all existing sessions upon password reset
+    await this.prisma.session.deleteMany({
+      where: { userId: user.id },
+    });
+
+    await this.prisma.securityEvent.create({
+      data: {
+        userId: user.id,
+        eventType: SecurityEventType.PASSWORD_CHANGED,
+        safeMetadata: { resetViaToken: true, timestamp: new Date().toISOString() },
+      },
+    });
+
+    return { message: 'Password has been reset successfully. You may now log in.' };
   }
 
   /**
@@ -302,7 +736,7 @@ export class AuthService {
     ip?: string,
   ): Promise<{ newRawToken: string }> {
     if (!rawToken || typeof rawToken !== 'string') {
-      throw new UnauthorizedException('No active session token provided.');
+      throw new UnauthorizedException('Missing session token.');
     }
 
     const tokenHash = this.hashToken(rawToken.trim());
@@ -311,15 +745,11 @@ export class AuthService {
     });
 
     if (!session) {
-      throw new UnauthorizedException('Session not found.');
+      throw new UnauthorizedException('Session not found or expired.');
     }
 
-    // REUSE DETECTION: A revoked token is being presented again!
-    if (session.revokedAt !== null) {
-      this.logger.warn(
-        `Session replay attack detected for family ${session.familyId}. Revoking entire family.`,
-      );
-
+    if (session.revokedAt) {
+      // Replay attack detected: revoke entire session family immediately
       await this.prisma.session.updateMany({
         where: { familyId: session.familyId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -330,30 +760,30 @@ export class AuthService {
           userId: session.userId,
           eventType: SecurityEventType.SUSPICIOUS_LOGIN,
           safeMetadata: {
-            reason: 'Session replay detected; entire family revoked',
+            reason: 'Session token replay detected — family revoked',
             familyId: session.familyId,
             ipMasked: maskIp(ip),
           },
         },
       });
 
+      this.logger.warn(`Session replay detected for family: ${session.familyId}. Family revoked.`);
       throw new UnauthorizedException(
-        'Security warning: Session token reuse detected. All active sessions in this family have been revoked.',
+        'Security alert: Session replay detected. Please log in again.',
       );
     }
 
-    // Check expiration
     if (session.expiresAt < new Date()) {
-      throw new UnauthorizedException('Session has expired. Please log in again.');
+      throw new UnauthorizedException('Session expired.');
     }
 
-    // ROTATE SESSION: Mark current session as revoked/replaced
+    // Revoke current token
     await this.prisma.session.update({
       where: { id: session.id },
       data: { revokedAt: new Date() },
     });
 
-    // Create fresh session under the SAME familyId
+    // Issue rotated token within the same family
     const newRawToken = `memoir_s_${crypto.randomBytes(32).toString('hex')}`;
     const newTokenHash = this.hashToken(newRawToken);
     const { deviceLabel, userAgentSummary } = parseDeviceLabel(userAgent);
@@ -365,8 +795,8 @@ export class AuthService {
         userId: session.userId,
         tokenHash: newTokenHash,
         familyId: session.familyId,
-        deviceLabel,
-        userAgentSummary,
+        deviceLabel: deviceLabel || session.deviceLabel,
+        userAgentSummary: userAgentSummary || session.userAgentSummary,
         ipMaskedOrHash: ipMasked,
         expiresAt,
       },
@@ -376,7 +806,7 @@ export class AuthService {
   }
 
   /**
-   * Logs out an active session by revoking it in the database.
+   * Logs out an active session by setting its revokedAt timestamp.
    */
   async logout(rawToken?: string): Promise<void> {
     if (!rawToken || typeof rawToken !== 'string') {
@@ -412,6 +842,7 @@ export class AuthService {
     email: string;
     emailVerifiedAt: Date | null;
     accountStatus: string;
+    totpEnabled: boolean;
     createdAt: Date;
   }> {
     const user = await this.prisma.user.findUnique({
@@ -427,6 +858,7 @@ export class AuthService {
       email: user.email,
       emailVerifiedAt: user.emailVerifiedAt,
       accountStatus: user.accountStatus,
+      totpEnabled: user.totpEnabled,
       createdAt: user.createdAt,
     };
   }

@@ -307,7 +307,57 @@ Operational metadata visible to the server for synchronization:
   - `pnpm --filter @memoir/api test` -> 12 test files passed (54 integration tests passing).
   - `pnpm --filter @memoir/web build` -> PASS in 10.45s.
 - **Atomic Commit Ledger:**
-  - `_(current)_` — `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests`
+  - `c1082c3` — `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests`
+
+#### Control 6.3: Rate Limiting & Account Lockout (Commit 35)
+
+- **Objective:** Enforce proxy-aware Redis-backed rate limiting with tiered limits across public/auth/recovery endpoints and exponential account lockout after consecutive failed authentication attempts.
+- **Implementation Summary:**
+  - Implemented `MemoirThrottlerGuard` in `apps/api/src/common/guards/throttler.guard.ts` extending NestJS `@nestjs/throttler`. Resolves real client IP using `X-Forwarded-For` and `req.ips` across trusted proxy hops, or user ID identifier (`usr:<userId>`) for authenticated sessions.
+  - Backed by Redis storage (`ThrottlerStorageRedisService`) via `ioredis` with automatic graceful in-memory fallback.
+  - Configured tiered throttling:
+    - `default`: 100 requests per 60 seconds across all endpoints.
+    - `auth`: 10 requests per 60 seconds on registration, login, 2FA, password change, and reset endpoints.
+    - `recovery`: 5 requests per 300 seconds on vault recovery attempts.
+    - Health probes (`/health`) explicitly exempted via `@SkipThrottle()`.
+  - Added RFC 7231 compliant `Retry-After` HTTP headers on all `429 Too Many Requests` responses.
+  - Implemented progressive exponential account lockout in `AuthService`: 5 failed attempts trigger an initial 15-minute lockout ($15 \times 2^{\min(\text{attempts}-5, 6)}$ min, capped at 24 hours) logging `LOCKOUT_TRIGGERED` security audit events and rejecting login attempts until `lockedUntil` expires.
+  - Authored automated test suite in `apps/api/test/security-ratelimit.spec.ts` (6 tests) verifying proxy IP resolution, auth throttling, 429 Retry-After headers, exponential lockout scaling, lockout bypass denial, and health probe exemptions.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/security-ratelimit.spec.ts` -> 6 passed (100%).
+- **Atomic Commit Ledger:**
+  - `f513799` — `security(ratelimit): enforce proxy-aware Redis rate limiting and exponential account lockout`
+
+#### Control 6.4: Two-Factor Authentication (TOTP), KMS Encryption & Password Lifecycle (Commit 36)
+
+- **Objective:** Implement RFC 6238 TOTP two-factor authentication, KMS AES-256-GCM envelope encryption for stored TOTP secrets, SHA-256 hashed single-use backup codes, and Three-Secret Separation password change/reset lifecycles.
+- **Implementation Summary:**
+  - Implemented server-side KMS encryption utility in `apps/api/src/common/security/kms.util.ts` using AES-256-GCM with `SERVER_KMS_KEY`, fresh 96-bit CSPRNG nonces, and record-bound AAD (`memoir:kms:v1`).
+  - Added Prisma migration `20261123202341_add_password_reset_tokens` adding `passwordResetTokenHash` and `passwordResetExpiresAt` to `users`.
+  - Integrated `otplib` (v13) and `qrcode` for RFC 6238 TOTP secret generation, QR code data URL generation, and verification with format error boundary guards.
+  - Built complete 2FA lifecycle in `AuthService`:
+    - `POST /api/v1/auth/2fa/setup`: Generates base32 secret, QR code data URL, 10 single-use `XXXX-XXXX` backup recovery codes, and temporary Redis enrollment cache (10 min TTL).
+    - `POST /api/v1/auth/2fa/enable`: Verifies code from authenticator app, encrypts secret via KMS AES-256-GCM, stores SHA-256 hashed backup codes, and sets `totpEnabled: true`. Emits `TOTP_ENABLED`.
+    - `POST /api/v1/auth/2fa/verify`: Validates 6-digit TOTP code or single-use backup code (which is permanently consumed from array upon use). Challenge token in Redis is deleted only upon successful verification. Creates authorized session.
+    - `POST /api/v1/auth/2fa/disable`: Re-authenticates account password via Argon2id, verifies TOTP or backup code, clears secrets from DB, and emits `TOTP_DISABLED`.
+    - Updated `POST /api/v1/auth/login`: If 2FA is active, issues short-lived `mfaToken` (5 min TTL) with `{ mfaRequired: true }` without session cookie, or accepts `totpCode` directly in initial payload.
+  - Built credential lifecycle adhering to **Three-Secret Separation**:
+    - `POST /api/v1/auth/change-password`: Verifies current password with Argon2id, updates password hash, revokes other sessions, strictly preserving `user_vaults`.
+    - `POST /api/v1/auth/forgot-password`: Anti-enumeration timing delay, dispatches reset link with SHA-256 hashed token.
+    - `POST /api/v1/auth/reset-password`: Validates token, updates password hash, revokes sessions, and guarantees zero mutation or corruption of `user_vaults`.
+  - Built frontend UI:
+    - MFA challenge form in `apps/web/src/pages/LoginPage.tsx` accepting TOTP or backup code with back button.
+    - 2FA Setup flow in `apps/web/src/pages/SecurityPage.tsx` with QR code image, copyable secret key, 10 backup codes with copy-all action, and code confirmation.
+    - 2FA Disable dialog requiring account password and TOTP/backup code.
+    - Account Password Lifecycle form with Three-Secret Separation disclosures.
+  - Authored automated test suite `apps/api/test/security-2fa-lifecycle.spec.ts` (15 tests) verifying setup, wrong token rejection, KMS ciphertext verification in PostgreSQL, login MFA challenge, backup code single-use consumption, disable re-authentication, password change, and password reset with zero-knowledge vault integrity assertion.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/security-2fa-lifecycle.spec.ts` -> 15 passed (100%).
+  - `pnpm --filter @memoir/web test` -> 4 test files passed (19 tests passing).
+  - `pnpm typecheck` -> PASS across all 4 packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+- **Atomic Commit Ledger:**
+  - `21a95dd` — `security(2fa): implement TOTP 2FA, KMS-encrypted secrets, hashed backup codes, and password lifecycle`
 
 ---
 
@@ -352,7 +402,9 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - **Account Lockout:** 5 consecutive failed login attempts trigger an exponential lockout duration ($15 \times 2^{\min(\text{attempts}-5, 6)}$ minutes, capped at 24 hours) emitting `LOCKOUT_TRIGGERED`. Successfully authenticating resets `failedLoginAttempts` and clears `lockedUntil`.
 - **Proxy-Aware Rate Limiting:** Backed by Redis with fail-safe in-memory fallback, tracking client IP via `X-Forwarded-For` and `usr:<id>` for authenticated requests. Tiered enforcement: `default` (100 req/min), `auth` (10 req/min), `recovery` (5 req/5min). Health probes exempted via `@SkipThrottle()`. Returns `429 Too Many Requests` with RFC 7231 `Retry-After` header.
 - **Email Verification:** Dispatched via Mailpit SMTP; tokens stored as SHA-256 hashes with 24-hour expiration.
-- **2FA & Passkeys:** Scheduled for Phase 6 (TOTP and WebAuthn Passkeys).
+- **Two-Factor Authentication (TOTP):** Full RFC 6238 implementation with QR code onboarding, KMS AES-256-GCM encryption for stored TOTP secrets (`memoir:kms:v1` AAD), and 10 single-use `XXXX-XXXX` backup codes stored as SHA-256 hashes. Backup codes are immediately consumed upon use.
+- **Three-Secret Separation & Credential Lifecycle:** Changing or resetting account passwords strictly updates the server authentication hash without touching, modifying, or corrupting `user_vaults`.
+- **Passkeys (WebAuthn):** Scheduled next in Phase 6.
 
 ---
 

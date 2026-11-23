@@ -39,6 +39,8 @@ model User {
   emailVerifiedAt      DateTime?
   emailVerifyTokenHash String?
   emailVerifyExpiresAt DateTime?
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
   accountStatus        AccountStatus @default(ACTIVE)
   totpSecretEncrypted  String?
   totpEnabled          Boolean       @default(false)

@@ -51,4 +51,44 @@ export class MailService {
       this.logger.error(`Failed to send verification email to ${to}: ${(error as Error).message}`);
     }
   }
+
+  async sendPasswordResetEmail(to: string, token: string): Promise<void> {
+    const webUrl = this.config.get('WEB_URL');
+    const resetUrl = `${webUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    const from = this.config.get('SMTP_FROM');
+
+    try {
+      await this.transporter.sendMail({
+        from,
+        to,
+        subject: 'Reset your Memoir account password',
+        text: `You requested a password reset for Memoir.\n\nOpen the following link to choose a new account password:\n\n${resetUrl}\n\nThis link expires in 1 hour.\n\nNote: Resetting your account password does NOT affect your encrypted vault. Your Vault Passphrase and Recovery Key remain unchanged.\n\nIf you did not request this, you can safely ignore this email.`,
+        html: `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Reset your Memoir account password</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf9f5; color: #1e1e1e; padding: 40px 20px;">
+  <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e4de; border-radius: 8px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+    <h1 style="font-family: Georgia, serif; font-size: 24px; font-weight: normal; margin-top: 0; margin-bottom: 16px; color: #181816;">Memoir</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #3b3a36; margin-bottom: 24px;">You requested a password reset for your account. Click the button below to set a new password.</p>
+    <div style="margin-bottom: 28px;">
+      <a href="${resetUrl}" style="display: inline-block; background-color: #1f2328; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">Reset Account Password</a>
+    </div>
+    <p style="font-size: 13px; color: #73726c; line-height: 1.5; margin-bottom: 8px;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 12px; word-break: break-all; color: #57564f; background: #f5f4ef; padding: 8px 12px; border-radius: 4px;">${resetUrl}</p>
+    <hr style="border: none; border-top: 1px solid #e5e4de; margin: 24px 0;" />
+    <p style="font-size: 12px; color: #73726c; margin-bottom: 8px;"><strong>Zero-Knowledge Reminder:</strong> Resetting your account password establishes login access only. It never modifies, resets, or decrypts your private vault or memories.</p>
+    <p style="font-size: 12px; color: #9c9a92; margin-bottom: 0;">This link will expire in 1 hour. If you did not request a password reset, no action is required.</p>
+  </div>
+</body>
+</html>
+`,
+      });
+      this.logger.log(`Password reset email dispatched to ${to}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send password reset email to ${to}: ${(error as Error).message}`,
+      );
+    }
+  }
 }
