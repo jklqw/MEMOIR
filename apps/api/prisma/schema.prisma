@@ -1,0 +1,88 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_DELETION
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOCKOUT_TRIGGERED
+  EMAIL_VERIFIED
+  PASSWORD_CHANGED
+  VAULT_CREATED
+  VAULT_PASSPHRASE_ROTATED
+  RECOVERY_KEY_USED
+  TOTP_ENABLED
+  TOTP_DISABLED
+  PASSKEY_ADDED
+  PASSKEY_REMOVED
+  SESSION_REVOKED
+  SUSPICIOUS_LOGIN
+  BACKUP_EXPORTED
+  ACCOUNT_DELETION_REQUESTED
+}
+
+model User {
+  id                   String        @id @default(uuid()) @db.Uuid
+  email                String        @unique
+  passwordHash         String
+  emailVerifiedAt      DateTime?
+  emailVerifyTokenHash String?
+  emailVerifyExpiresAt DateTime?
+  accountStatus        AccountStatus @default(ACTIVE)
+  totpSecretEncrypted  String?
+  totpEnabled          Boolean       @default(false)
+  totpBackupCodesHash  Json?
+  failedLoginAttempts  Int           @default(0)
+  lockedUntil          DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  sessions             Session[]
+  securityEvents       SecurityEvent[]
+
+  @@map("users")
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  tokenHash        String    @unique
+  familyId         String    @db.Uuid
+  deviceLabel      String
+  userAgentSummary String
+  ipMaskedOrHash   String
+  lastSeenAt       DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([familyId])
+  @@map("sessions")
+}
+
+model SecurityEvent {
+  id           String            @id @default(uuid()) @db.Uuid
+  userId       String            @db.Uuid
+  eventType    SecurityEventType
+  safeMetadata Json              @default("{}")
+  createdAt    DateTime          @default(now())
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("security_events")
+}
