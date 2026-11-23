@@ -4,6 +4,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { HealthModule } from './health/health.module.js';
 import { MailModule } from './mail/mail.module.js';
+import { MemoriesModule } from './memories/memories.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
@@ -18,6 +19,7 @@ import { VaultModule } from './vault/vault.module.js';
     AuthModule,
     SessionsModule,
     VaultModule,
+    MemoriesModule,
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',

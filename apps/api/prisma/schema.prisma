@@ -51,6 +51,7 @@ model User {
   sessions             Session[]
   securityEvents       SecurityEvent[]
   vault                UserVault?
+  memories             Memory[]
 
   @@map("users")
 }
@@ -110,4 +111,27 @@ model SecurityEvent {
 
   @@index([userId, createdAt])
   @@map("security_events")
+}
+
+model Memory {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid
+  entryDate       DateTime
+  isPinned        Boolean   @default(false)
+  isTimeCapsule   Boolean   @default(false)
+  unlockAt        DateTime?
+  envelopeVersion Int       @default(1)
+  algorithm       String    @default("AES-256-GCM")
+  ciphertext      String
+  nonce           String
+  archivedAt      DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, entryDate])
+  @@map("memories")
 }
