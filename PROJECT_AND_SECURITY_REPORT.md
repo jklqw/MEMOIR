@@ -411,7 +411,61 @@ Operational metadata visible to the server for synchronization:
   - `pnpm typecheck` -> PASS across all workspace packages (0 errors).
   - `pnpm lint` -> PASS (0 errors).
 - **Atomic Commit Ledger:**
-  - _(current)_ — `security(audit): add logging redaction tests, suspicious login detection, and Security Dashboard UI`
+  - `88df3ec` — `security(audit): add logging redaction tests, suspicious login detection, and Security Dashboard UI`
+
+#### Control 6.7: Consolidated Security Regression Suite (Commit 39)
+
+- **Objective:** Establish an automated, modular, and exhaustive security regression test suite inside `apps/api/test/security/` verifying all 8 critical application security controls and zero-knowledge invariants end-to-end.
+- **Implementation Summary:**
+  - Authored shared test harness `apps/api/test/security/security-test-helper.ts` providing standard NestJS test app compilation with all security middlewares, CsrfGuard, strict ValidationPipe (`whitelist: true, forbidNonWhitelisted: true`), AllExceptionsFilter, TransformInterceptor, and proxy-aware IP resolution.
+  - Authored `apps/api/test/security/idor-isolation.spec.ts` (10 tests) verifying:
+    - User B cannot read, update, pin, archive, restore, or delete User A memories via `/api/v1/memories/:id` (strictly returns 404).
+    - User B's timeline `/api/v1/memories` excludes User A memories.
+    - User B cannot inspect metadata, download binary ciphertext, or delete User A attachments via `/api/v1/attachments/:id` (404).
+    - User B cannot revoke User A sessions via `/api/v1/sessions/:id` (404) and session listings remain strictly user-isolated.
+    - User B cannot view User A zero-knowledge vault or security audit events.
+  - Authored `apps/api/test/security/sql-injection-defenses.spec.ts` (7 tests) verifying:
+    - Tautologies (`' OR '1'='1' --`), destructive DDL (`'; DROP TABLE memories CASCADE; --`), and subqueries are safely validated or parameterized across query parameters (`?cursor=...`).
+    - UNION-based extraction payloads in audit event queries (`?eventType=...`) safely fail DTO validation without leaking data.
+    - Path parameter injections are intercepted by ParseUUIDPipe with 400 Bad Request before hitting Prisma.
+    - Injection payloads in authentication email/password are safely handled without SQL crashes.
+    - Storing ciphertext with SQL syntax is persisted as literal text without execution.
+    - PostgreSQL schema integrity check: confirms all 6 core tables (`users`, `memories`, `attachments`, `user_vaults`, `sessions`, `security_events`) remain completely intact.
+  - Authored `apps/api/test/security/csrf-and-headers.spec.ts` (14 tests) verifying:
+    - 64-character hex CSRF token generation with `SameSite=Strict` cookie via `GET /api/v1/auth/csrf`.
+    - Mandatory CSRF protection on mutations (`POST`, `PUT`, `PATCH`, `DELETE`): missing, tampered, or mismatched tokens return 403 Forbidden.
+    - Origin and Referer validation: untrusted or missing origins on cookie-authenticated requests return 403 Forbidden.
+    - Safe methods (`GET`, `HEAD`, `OPTIONS`) remain exempt.
+    - Defense-in-depth headers: strict Content-Security-Policy (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`), Strict-Transport-Security (1-year max-age, subdomains, preload), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, `COOP/CORP: same-origin`, allowlisted CORS, and stripped `X-Powered-By`.
+  - Authored `apps/api/test/security/ratelimit-and-lockout.spec.ts` (7 tests) verifying:
+    - Throttling bypass for `@SkipThrottle` health check probes.
+    - Rapid authentication bursts trigger `429 Too Many Requests` with `Retry-After` header.
+    - Client IP isolation for throttled routes using proxy-aware `X-Forwarded-For`.
+    - 5-failure exponential account lockout: account is locked for >= 15 minutes, emitting `LOCKOUT_TRIGGERED`.
+    - Fail-closed behavior: valid passwords during an active lockout are strictly rejected.
+    - Refresh-token replay detection: replaying an already-rotated session token immediately revokes the entire session family, emits `SUSPICIOUS_LOGIN`, and denies subsequent requests from all tokens in that family.
+  - Authored `apps/api/test/security/uploads-and-traversal.spec.ts` (8 tests) verifying:
+    - 10 MB per-file upload limit and 0-byte empty payload rejection.
+    - Cryptographic envelope validation: missing mandatory fields (`ciphertext`, `nonce`) rejected with 400.
+    - Mass assignment protection: non-whitelisted properties (`isAdmin`, `role`, `userId`) strictly rejected with 400.
+    - URL path traversal attacks (`../../etc/passwd`, `%2e%2e%2f`) rejected before reaching filesystem.
+    - LocalStorageProvider directory traversal validation: invalid keys without UUIDv4 + `.enc` rejected immediately.
+    - Binary streaming headers on download: enforces `application/octet-stream`, `attachment; filename="encrypted.bin"`, `nosniff`, and `no-store, no-cache`.
+  - Authored `apps/api/test/security/zero-knowledge-plaintext-absence.spec.ts` (8 tests) verifying:
+    - Schema architecture verification: PostgreSQL `memories` and `attachments` tables contain zero plaintext columns (`title`, `body`, `tags`, `mood`, `filename`, `plaintext`).
+    - Direct database canary checks: canary title, body, tag, mood, filename, binary bytes, passphrase, and recovery key strings injected into client encryption envelopes never appear anywhere in `memories`, `attachments`, `user_vaults`, `users`, or `security_events` tables.
+    - Full-database substring scan: exhaustively queries all text/varchar columns across all public tables, verifying 0 occurrences of any canary string.
+    - Local storage binary scan: physically inspects stored `.enc` binary files on disk, verifying zero occurrences of canary plaintexts in physical storage.
+  - Enhanced `AllExceptionsFilter` in `apps/api/src/common/filters/all-exceptions.filter.ts` to gracefully handle Express body parser `entity.too.large` (413) and non-HttpException status codes.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test:security` -> 6 test files passed (54 security regression tests passing, 100%).
+  - `pnpm --filter @memoir/api test` -> 22 test files passed (155 integration tests passing, 100%).
+  - `pnpm --filter @memoir/crypto test` -> 13 core invariant tests passing (100%).
+  - `pnpm --filter @memoir/web test` -> 19 tests passing (100%).
+  - `pnpm typecheck` -> PASS across all workspace packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+- **Atomic Commit Ledger:**
+  - _(current)_ — `test(security): add comprehensive automated security regression test suite`
 
 ---
 
@@ -504,6 +558,8 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | **TOTP 2FA & Password Lifecycle**   | `@memoir/api`    | `vitest run test/security-2fa-lifecycle.spec.ts`    | PASS (15 tests) | 2026-11-23 | Verified KMS AES-GCM, single-use backup codes, and Three-Secret separation |
 | **WebAuthn Passkeys & Vault Guard** | `@memoir/api`    | `vitest run test/security-passkeys.spec.ts`         | PASS (14 tests) | 2026-11-23 | Verified FIDO2 passkeys, replay counter, IDOR checks, zero-knowledge lock  |
 | **Audit Redaction & Threat Heuristics**| `@memoir/api` | `vitest run test/security-audit-redaction.spec.ts`  | PASS (9 tests)  | 2026-11-24 | Verified Pino secret redaction, suspicious login heuristics, audit viewer |
+| **Security Regression Suite**        | `@memoir/api`    | `pnpm --filter @memoir/api test:security`          | PASS (54 tests) | 2026-11-24 | Verified IDOR, SQLi, CSRF, Headers, RateLimit, Lockout, Envelopes, ZKP     |
+| **Total API Test Suite**             | `@memoir/api`    | `pnpm --filter @memoir/api test`                   | PASS (155 tests)| 2026-11-24 | 22 test suites covering 100% of business, crypto, and security logic       |
 | **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`                   | PASS (0 errors) | 2026-11-24 | Built Vite bundle with self-hosted bundled fonts in 11.11s                 |
 
 ---
@@ -578,7 +634,8 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | `f513799`   | `security(ratelimit): enforce proxy-aware Redis rate limiting and exponential account lockout`          | Proxy-Aware Rate Limiting & Lockout   | Verified            |
 | `0d11373`   | `security(2fa): implement TOTP 2FA, KMS-encrypted secrets, hashed backup codes, and password lifecycle` | RFC 6238 TOTP & KMS Secret Encryption | Verified            |
 | `3909849`   | `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`           | FIDO2 WebAuthn & Vault Lock Boundary  | Verified            |
-| _(current)_ | `security(audit): add logging redaction tests, suspicious login detection, and Security Dashboard UI`   | Pino Redaction & Threat Dashboard UI  | Verified            |
+| `88df3ec`   | `security(audit): add logging redaction tests, suspicious login detection, and Security Dashboard UI`   | Pino Redaction & Threat Dashboard UI  | Verified            |
+| _(current)_ | `test(security): add comprehensive automated security regression test suite`                            | 8 Security Regression Suites (54 tests)| Verified           |
 
 ---
 
@@ -596,7 +653,7 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
-  - `@memoir/api`: 98 integration tests across 16 test suites passing (100%).
+  - `@memoir/api`: 155 integration and security regression tests across 22 test suites passing (100%).
   - `@memoir/web`: 19 frontend tests across 4 test suites passing (100%).
 - Web client builds deterministically with 100% self-hosted typography and zero external CDNs.
 
@@ -612,4 +669,5 @@ Phase 6 Application Security Hardening is advancing under the strict One Commit 
 - **TOTP 2FA & Password Lifecycle (Commit 36):** RFC 6238 TOTP, KMS AES-256-GCM encrypted secrets, and single-use hashed backup codes implemented.
 - **Passkeys (Commit 37):** WebAuthn FIDO2 authentication landed with strict replay protection and zero-knowledge vault isolation.
 - **Audit Logging & Threat Heuristics (Commit 38):** Pino secret redaction verified, suspicious login detection heuristics active, and Security Dashboard UI with monospace audit log delivered.
-- **Upcoming Controls:** Consolidated security regression suite (Commit 39) and Security CI/CD, secret scanning & dependency audits (Commit 40).
+- **Consolidated Security Regression Suite (Commit 39):** 54 comprehensive security tests covering cross-user IDOR, SQL injection, CSRF enforcement, security headers, rate limiting, account lockout, refresh-token reuse revocation, oversized uploads, encryption envelope validation, path traversal, and direct PostgreSQL/storage zero-knowledge plaintext absence checks landed and passing (100%).
+- **Upcoming Controls:** Security CI/CD, secret scanning & dependency audits (Commit 40).

@@ -39,6 +39,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         }
         code = (obj['code'] as ApiErrorCode) || this.mapStatusToCode(status);
       }
+    } else if (
+      (exception as Record<string, unknown>)?.['type'] === 'entity.too.large' ||
+      (exception as Record<string, unknown>)?.['status'] === 413 ||
+      (exception as Record<string, unknown>)?.['statusCode'] === 413
+    ) {
+      status = HttpStatus.PAYLOAD_TOO_LARGE;
+      code = ApiErrorCode.BAD_REQUEST;
+      message = 'Request payload too large.';
+    } else if (typeof (exception as Record<string, unknown>)?.['status'] === 'number') {
+      status = (exception as Record<string, unknown>)['status'] as number;
+      message = ((exception as Record<string, unknown>)['message'] as string) || 'Request error';
+      code = this.mapStatusToCode(status);
     } else if (exception instanceof Error) {
       this.logger.error(`Unhandled internal error: ${exception.message}`, exception.stack);
       message = 'An internal server error occurred';
