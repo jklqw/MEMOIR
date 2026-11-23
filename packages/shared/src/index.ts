@@ -259,3 +259,50 @@ export interface SessionResponse {
   isCurrent: boolean;
   createdAt: string;
 }
+
+/**
+ * Attachment Metadata Payload (encrypted client-side under FileKey or DEK)
+ */
+export interface AttachmentMetadataPayload {
+  originalFilename: string;
+  mimeType: string;
+  originalSize: number;
+}
+
+/**
+ * Attachment View Response (zero plaintext filename, MIME, or bytes)
+ */
+export interface AttachmentResponse {
+  id: string;
+  userId: string;
+  memoryId?: string | null;
+  isVaultItem: boolean;
+  storageKey: string;
+  byteSize: number;
+  wrappedFileKey: string;
+  fileKeyNonce: string;
+  encryptedMetadata: string;
+  metaNonce: string;
+  fileNonce: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Decrypted Attachment Metadata View
+ */
+export interface DecryptedAttachment extends AttachmentResponse {
+  originalFilename: string;
+  mimeType: string;
+  originalSize: number;
+}
+
+/**
+ * User Storage Quota Response
+ */
+export interface StorageQuotaResponse {
+  usedBytes: number;
+  quotaBytes: number;
+  percentage: number;
+}
+

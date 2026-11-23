@@ -2,11 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateDek } from '@memoir/crypto';
 import type { DecryptedMemory, MemoryPayload } from '@memoir/shared';
 import {
-  buildEncryptedCreateDto,
   buildEncryptedUpdateDto,
   decryptMemory,
   encryptMemory,
-  getMemoryAad,
 } from '../src/services/memoryCryptoService.js';
 
 describe('Memory Client Cryptography, AAD Binding & Local Search Verification', () => {
