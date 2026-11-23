@@ -1,5 +1,11 @@
 import crypto from 'node:crypto';
-import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { SecurityEventType } from '@prisma/client';
 import argon2 from 'argon2';
 import { maskIp, parseDeviceLabel } from '../common/utils/device.util.js';
@@ -18,8 +24,8 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly mailService: MailService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(MailService) private readonly mailService: MailService,
   ) {}
 
   /**

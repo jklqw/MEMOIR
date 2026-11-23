@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import {
   Body,
   Controller,
@@ -5,6 +6,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Inject,
   Ip,
   Post,
   Req,
@@ -13,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { CSRF_COOKIE_NAME } from '../common/guards/csrf.guard.js';
 import { AuthService } from './auth.service.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -29,10 +32,18 @@ export const COOKIE_OPTIONS = {
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
+export const CSRF_COOKIE_OPTIONS = {
+  httpOnly: false, // Must be readable by client JS to send in X-CSRF-Token header
+  secure: isProduction,
+  sameSite: 'strict' as const,
+  path: '/',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
+
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
   @Post('register')
   @HttpCode(HttpStatus.OK)
@@ -65,6 +76,16 @@ export class AuthController {
     return this.authService.verifyEmail(dto);
   }
 
+  @Get('csrf')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Obtain a fresh CSRF token' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'CSRF token issued successfully.' })
+  getCsrfToken(@Res({ passthrough: true }) response: Response) {
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    response.cookie(CSRF_COOKIE_NAME, csrfToken, CSRF_COOKIE_OPTIONS);
+    return { csrfToken };
+  }
+
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -85,7 +106,9 @@ export class AuthController {
   ) {
     const { user, rawToken } = await this.authService.login(dto, userAgent, ip);
     response.cookie(SESSION_COOKIE_NAME, rawToken, COOKIE_OPTIONS);
-    return { user };
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    response.cookie(CSRF_COOKIE_NAME, csrfToken, CSRF_COOKIE_OPTIONS);
+    return { user, csrfToken };
   }
 
   @Post('refresh')
@@ -112,9 +135,12 @@ export class AuthController {
     try {
       const { newRawToken } = await this.authService.refreshSession(rawToken ?? '', userAgent, ip);
       response.cookie(SESSION_COOKIE_NAME, newRawToken, COOKIE_OPTIONS);
-      return { message: 'Session refreshed successfully.' };
+      const csrfToken = crypto.randomBytes(32).toString('hex');
+      response.cookie(CSRF_COOKIE_NAME, csrfToken, CSRF_COOKIE_OPTIONS);
+      return { message: 'Session refreshed successfully.', csrfToken };
     } catch (error) {
       response.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+      response.clearCookie(CSRF_COOKIE_NAME, { path: '/' });
       throw error;
     }
   }
@@ -132,6 +158,7 @@ export class AuthController {
     ];
     await this.authService.logout(rawToken);
     response.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    response.clearCookie(CSRF_COOKIE_NAME, { path: '/' });
     return { message: 'Logged out successfully.' };
   }
 

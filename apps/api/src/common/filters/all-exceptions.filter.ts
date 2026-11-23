@@ -29,8 +29,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = res;
       } else if (typeof res === 'object' && res !== null) {
         const obj = res as Record<string, unknown>;
-        message = (obj['message'] as string) || exception.message;
-        details = obj['details'] || (Array.isArray(obj['message']) ? obj['message'] : undefined);
+        const rawMsg = obj['message'];
+        if (Array.isArray(rawMsg)) {
+          message = rawMsg.join('; ');
+          details = obj['details'] || rawMsg;
+        } else {
+          message = (rawMsg as string) || exception.message;
+          details = obj['details'];
+        }
         code = (obj['code'] as ApiErrorCode) || this.mapStatusToCode(status);
       }
     } else if (exception instanceof Error) {

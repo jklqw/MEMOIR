@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
+import { CsrfGuard } from './common/guards/csrf.guard.js';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
 import { setupSecurityMiddleware } from './common/security/security-headers.js';
 import { AppConfigService } from './config/config.service.js';
@@ -20,6 +21,9 @@ async function bootstrap() {
 
   // Global prefix
   app.setGlobalPrefix('api/v1');
+
+  // Global guards (CSRF protection on cookie-authenticated mutations)
+  app.useGlobalGuards(new CsrfGuard(config));
 
   // Global pipes, filters, interceptors
   app.useGlobalPipes(

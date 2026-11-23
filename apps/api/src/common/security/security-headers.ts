@@ -69,7 +69,7 @@ export function setupSecurityMiddleware(app: INestApplication, config: AppConfig
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      callback(new Error('CORS request blocked by origin allowlist policy'));
+      callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

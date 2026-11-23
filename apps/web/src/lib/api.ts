@@ -19,12 +19,26 @@ interface ApiResponseEnvelope<T> {
   };
 }
 
+function getCsrfTokenFromCookie(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+  return match && match[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = endpoint.startsWith('/') ? endpoint : `/api/v1/${endpoint}`;
 
   const defaultHeaders: Record<string, string> = {
     Accept: 'application/json',
   };
+
+  const method = (options.method || 'GET').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      defaultHeaders['x-csrf-token'] = csrfToken;
+    }
+  }
 
   if (options.body && typeof options.body === 'string') {
     defaultHeaders['Content-Type'] = 'application/json';
