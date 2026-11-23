@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiOperation, ApiResponse as SwaggerResponse, ApiTags } from '@nestjs/swagger';
 import { MEMOIR_PROTOCOL_VERSION } from '@memoir/shared';
 import { Redis } from 'ioredis';
@@ -19,7 +19,7 @@ interface HealthCheckResult {
 @ApiTags('Health')
 @Controller('health')
 export class HealthController {
-  constructor(private readonly config: AppConfigService) {}
+  constructor(@Inject(AppConfigService) private readonly config: AppConfigService) {}
 
   @Get()
   @ApiOperation({ summary: 'Liveness and readiness health check' })

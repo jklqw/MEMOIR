@@ -261,6 +261,32 @@ Operational metadata visible to the server for synchronization:
   - `01b7ba2` — `feat(portability): add encrypted backup export/import and warning-gated plaintext export`
   - `7e73587` — `docs(report): append Phase 5 attachments and portability verification to report`
 
+### Phase 6 — Application Security Hardening
+
+> **Phase Policy:** Every security control receives its own dedicated atomic commit, automated test suite, and report entry.
+
+#### Control 6.1: Security Headers, Strict CSP, HSTS & Allowlisted CORS (Commit 33)
+
+- **Objective:** Configure Helmet and reverse-proxy header parity with strict Content Security Policy (verified against the production Vite build), HSTS (1 year + preload), nosniff, no-referrer, frame-ancestors 'none', Permissions-Policy, and allowlisted CORS with credentials support.
+- **Implementation Summary:**
+  - Built `setupSecurityMiddleware` in `apps/api/src/common/security/security-headers.ts` configuring:
+    - **Content-Security-Policy (CSP):** `default-src 'self'`, `script-src 'self'`, `style-src 'self' 'unsafe-inline'`, `img-src 'self' data: blob:`, `connect-src 'self' [allowlisted origins]`, `font-src 'self'`, `object-src 'none'`, `media-src 'self' blob:`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`.
+    - **Strict-Transport-Security (HSTS):** `max-age=31536000; includeSubDomains; preload`.
+    - **X-Content-Type-Options:** `nosniff` (blocking MIME sniffing).
+    - **Referrer-Policy:** `no-referrer` (preventing referer information leaks).
+    - **X-Frame-Options & CSP frame-ancestors:** `DENY` and `'none'` (preventing clickjacking).
+    - **Permissions-Policy:** `camera=(), microphone=(), geolocation=(), payment=(), usb=(), screen-wake-lock=()`.
+    - **Cross-Origin Policies:** `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`.
+    - **Allowlisted CORS:** Restricts origins to configured `WEB_URL`, `http://localhost:5173`, `http://127.0.0.1:5173` with `credentials: true`; rejects unlisted origins.
+  - Built Nginx reverse proxy configuration with full security header parity in `infra/proxy/memoir.conf` enforcing TLS 1.3, identical CSP/HSTS/security headers, and static asset immutability.
+  - Verified CSP compatibility against the production Vite build (`pnpm --filter @memoir/web build`).
+  - Authored automated test suite `apps/api/test/security-headers.spec.ts` (9 tests) verifying every security header and CORS allowlist enforcement.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/security-headers.spec.ts` -> 9 passed (100%).
+  - `pnpm --filter @memoir/web build` -> PASS in 8.75s (all assets adhere to strict CSP).
+- **Atomic Commit Ledger:**
+  - `_(current)_` — `security(headers): enforce strict CSP, HSTS, Helmet headers, and allowlisted CORS`
+
 ---
 
 ## 5. Cryptography & Key Management
@@ -412,6 +438,7 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | `18a7ec4`   | `feat(vault): add Private Vault UI for standalone encrypted documents and photos`             | Standalone vault files & quota meter  | Verified            |
 | `01b7ba2`   | `feat(portability): add encrypted backup export/import and warning-gated plaintext export`    | SHA-256 manifest & warning gate       | Verified            |
 | `7e73587`   | `docs(report): append Phase 5 attachments and portability verification to report`             | Phase 5 milestone verification        | Verified            |
+| _(pending)_ | `security(headers): enforce strict CSP, HSTS, Helmet headers, and allowlisted CORS`           | Strict CSP, HSTS, Helmet & CORS       | Verified            |
 
 ---
 

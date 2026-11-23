@@ -12,7 +12,7 @@ export class StorageService {
   private readonly logger = new Logger(StorageService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(STORAGE_PROVIDER) private readonly provider: StorageProvider,
   ) {}
 

@@ -1,12 +1,11 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
+import { setupSecurityMiddleware } from './common/security/security-headers.js';
 import { AppConfigService } from './config/config.service.js';
 
 async function bootstrap() {
@@ -16,22 +15,8 @@ async function bootstrap() {
   const logger = app.get(Logger);
   app.useLogger(logger);
 
-  // Security middlewares
-  app.use(
-    helmet({
-      contentSecurityPolicy: false, // Edge proxy or dedicated middleware handles strict CSP
-      crossOriginEmbedderPolicy: false,
-    }),
-  );
-  app.use(cookieParser());
-
-  // CORS configuration
-  app.enableCors({
-    origin: [config.get('WEB_URL'), 'http://localhost:5173', 'http://127.0.0.1:5173'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
-  });
+  // Security middlewares (Helmet, strict CSP, HSTS, Permissions-Policy, CORS, Cookies)
+  setupSecurityMiddleware(app, config);
 
   // Global prefix
   app.setGlobalPrefix('api/v1');
