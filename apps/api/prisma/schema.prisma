@@ -53,6 +53,7 @@ model User {
   vault                UserVault?
   memories             Memory[]
   attachments          Attachment[]
+  backups              Backup[]
 
   @@map("users")
 }
@@ -161,5 +162,19 @@ model Attachment {
   @@index([userId, isVaultItem])
   @@index([memoryId])
   @@map("attachments")
+}
+
+model Backup {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  checksumSha256 String
+  entryCount     Int
+  byteSize       Int
+  createdAt      DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("backups")
 }
 

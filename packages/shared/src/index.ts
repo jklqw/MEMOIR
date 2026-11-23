@@ -305,3 +305,77 @@ export interface StorageQuotaResponse {
   quotaBytes: number;
   percentage: number;
 }
+
+/**
+ * Backup Manifest and Envelopes (Zero-Knowledge)
+ */
+export interface MemoirBackupManifest {
+  version: 1;
+  exportedAt: string;
+  userId: string;
+  entryCount: number;
+  checksumSha256: string;
+}
+
+export interface MemoirEncryptedBackup {
+  manifest: MemoirBackupManifest;
+  vault: {
+    kdfAlgorithm: string;
+    kdfSalt: string;
+    kdfMemory: number;
+    kdfIterations: number;
+    kdfParallelism: number;
+    wrapAlgorithm: string;
+    envelopeVersion: number;
+    wrappedDek: string;
+    wrappedDekNonce: string;
+    recoverySalt: string;
+    recoveryWrappedDek: string;
+    recoveryNonce: string;
+    recoveryKeyFingerprint: string;
+  };
+  memories: Array<{
+    id: string;
+    entryDate: string;
+    isPinned: boolean;
+    isTimeCapsule: boolean;
+    unlockAt?: string | null;
+    envelopeVersion: number;
+    algorithm: string;
+    ciphertext: string;
+    nonce: string;
+    archivedAt?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  attachments: Array<{
+    id: string;
+    memoryId?: string | null;
+    isVaultItem: boolean;
+    storageKey: string;
+    byteSize: number;
+    wrappedFileKey: string;
+    fileKeyNonce: string;
+    encryptedMetadata: string;
+    metaNonce: string;
+    fileNonce: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface BackupHistoryItem {
+  id: string;
+  userId: string;
+  checksumSha256: string;
+  entryCount: number;
+  byteSize: number;
+  createdAt: string;
+}
+
+export interface BackupRestoreResult {
+  restoredMemoriesCount: number;
+  restoredAttachmentsCount: number;
+  skippedMemoriesCount: number;
+  skippedAttachmentsCount: number;
+}
