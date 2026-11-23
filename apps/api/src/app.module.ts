@@ -5,13 +5,17 @@ import { ConfigModule } from './config/config.module.js';
 import { HealthModule } from './health/health.module.js';
 import { MailModule } from './mail/mail.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { RedisModule } from './redis/redis.module.js';
+import { SessionsModule } from './sessions/sessions.module.js';
 
 @Module({
   imports: [
     ConfigModule,
+    RedisModule,
     PrismaModule,
     MailModule,
     AuthModule,
+    SessionsModule,
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
