@@ -1,0 +1,47 @@
+name: memoir
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: memoir-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memoir
+      POSTGRES_PASSWORD: memoir_dev_password
+      POSTGRES_DB: memoir_dev
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U memoir -d memoir_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: memoir-redis
+    restart: unless-stopped
+    command: ['redis-server', '--requirepass', 'memoir_redis_password']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'memoir_redis_password', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: memoir-mailpit
+    restart: unless-stopped
+    ports:
+      - '${MAILPIT_SMTP_PORT:-1025}:1025' # SMTP
+      - '${MAILPIT_WEB_PORT:-8025}:8025' # Web UI
+
+volumes:
+  postgres_data:
+  redis_data:
