@@ -152,6 +152,7 @@ export type RecoverVaultDto = z.infer<typeof RecoverVaultSchema>;
  * Memory DTO Schemas
  */
 export const CreateMemorySchema = z.object({
+  id: z.string().uuid().optional(),
   entryDate: z
     .string()
     .datetime({ offset: true })
@@ -165,6 +166,16 @@ export const CreateMemorySchema = z.object({
   nonce: z.string().min(1, 'Nonce is required'),
 });
 export type CreateMemoryDto = z.infer<typeof CreateMemorySchema>;
+
+export const MemoryPayloadSchema = z.object({
+  title: z.string().default(''),
+  bodyMarkdown: z.string().default(''),
+  mood: z.string().nullable().optional(),
+  tags: z.array(z.string()).default([]),
+  customMeta: z.record(z.unknown()).optional(),
+  schemaVersion: z.number().int().default(1),
+});
+export type MemoryPayload = z.infer<typeof MemoryPayloadSchema>;
 
 export const UpdateMemorySchema = z.object({
   entryDate: z
@@ -220,9 +231,32 @@ export interface MemoryItemResponse {
   algorithm: string;
   ciphertext?: string; // Omitted by server if Time Capsule is locked
   nonce?: string;
+  isLockedTimeCapsule?: boolean;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DecryptedMemory {
+  id: string;
+  userId: string;
+  entryDate: string;
+  isPinned: boolean;
+  isTimeCapsule: boolean;
+  unlockAt: string | null;
+  envelopeVersion: number;
+  algorithm: string;
+  isLockedTimeCapsule?: boolean;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // Decrypted contents:
+  title: string;
+  bodyMarkdown: string;
+  mood?: string | null;
+  tags: string[];
+  customMeta?: Record<string, unknown>;
+  schemaVersion: number;
 }
 
 /**

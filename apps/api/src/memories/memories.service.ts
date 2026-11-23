@@ -42,6 +42,7 @@ export class MemoriesService {
 
     return this.prisma.memory.create({
       data: {
+        id: dto.id,
         userId,
         entryDate: new Date(dto.entryDate),
         isPinned: dto.isPinned ?? false,

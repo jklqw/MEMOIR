@@ -7,9 +7,18 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
 } from 'class-validator';
 
 export class CreateMemoryDto {
+  @ApiPropertyOptional({
+    example: 'b8e5c102-39f1-4df6-8488-82df31d5b3a1',
+    description: 'Client-generated UUIDv4 for pre-bound AAD',
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({
     example: '2026-11-23T12:00:00.000Z',
     description: 'Operational entry date bucket',
