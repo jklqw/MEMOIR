@@ -2,7 +2,7 @@
 
 > **Document Classification:** Engineering Cryptographic Reference  
 > **Target Package:** `packages/crypto`  
-> **Status:** Canonical Specification  
+> **Status:** Canonical Specification
 
 ---
 
@@ -29,25 +29,25 @@ flowchart TD
     subgraph ClientOnly ["Trusted Client Boundary (Browser RAM Only)"]
         Passphrase["Vault Passphrase<br/>(Client input, never sent to server)"]
         RecoveryRaw["Recovery Key (256-bit CSPRNG)<br/>(Crockford Base32 Printable Sheet)"]
-        
+
         SaltP["Passphrase Salt (16B CSPRNG)"]
         SaltR["Recovery Salt (16B CSPRNG)"]
-        
+
         Argon["Argon2id (hash-wasm)<br/>m=64MiB, t=3, p=1"]
         HKDF1["HKDF-SHA256<br/>info: memoir:v1|kdf|passphrase-kek"]
         HKDF2["HKDF-SHA256<br/>info: memoir:v1|kdf|recovery-kek"]
-        
+
         PassphraseKEK["PassphraseKEK<br/>(256-bit AES-GCM Key)"]
         RecoveryKEK["RecoveryKEK<br/>(256-bit AES-GCM Key)"]
-        
+
         DEK["Data Encryption Key (DEK)<br/>(256-bit CSPRNG AES-GCM Key in RAM)"]
-        
+
         FileKey["Per-Attachment FileKey<br/>(256-bit CSPRNG AES-GCM Key)"]
-        
+
         MemPayload["Padded Memory Payload<br/>(Length Prefix + 256B Boundary)"]
         FileBytes["Stripped File Bytes<br/>(EXIF removed client-side)"]
     end
-    
+
     subgraph Storage ["Untrusted Storage (PostgreSQL & Disk)"]
         WrappedDEK["Wrapped DEK<br/>(AES-256-GCM ciphertext + tag + nonce)"]
         RecWrappedDEK["Recovery Wrapped DEK<br/>(AES-256-GCM ciphertext + tag + nonce)"]
@@ -59,16 +59,16 @@ flowchart TD
     Passphrase --> Argon
     SaltP --> Argon
     Argon --> HKDF1 --> PassphraseKEK
-    
+
     RecoveryRaw --> HKDF2
     SaltR --> HKDF2 --> RecoveryKEK
-    
+
     DEK -->|Wrapped under PassphraseKEK + AAD| WrappedDEK
     DEK -->|Wrapped under RecoveryKEK + AAD| RecWrappedDEK
-    
+
     DEK -->|Encrypts Padded Payload + AAD| MemCiphertext
     MemPayload --> MemCiphertext
-    
+
     DEK -->|Wraps FileKey + AAD| WrappedFileKey
     FileKey -->|Encrypts File Bytes + AAD| FileCiphertext
     FileBytes --> FileCiphertext
@@ -78,13 +78,13 @@ flowchart TD
 
 ## 3. Primitives & Parameters
 
-| Component | Standard / Algorithm | Parameters & Details |
-| :--- | :--- | :--- |
-| **Passphrase KDF** | `Argon2id` (WASM via `hash-wasm`) | Memory: $65{,}536\text{ KiB}$ ($64\text{ MiB}$), Iterations: $3$, Parallelism: $1$, Salt: $16\text{ bytes}$ CSPRNG. Benchmark: $\sim 280\text{ ms}$ in Chrome/Firefox. |
-| **Domain Separation** | `HKDF-SHA256` (RFC 5869) | Hash: `SHA-256`, Length: $32\text{ bytes}$ ($256\text{ bits}$). Distinct `info` strings for each derived key. |
-| **Authenticated Encryption** | `AES-256-GCM` (Web Crypto) | Key Length: $256\text{ bits}$, Nonce: $96\text{ bits}$ ($12\text{ bytes}$) CSPRNG, Auth Tag: $128\text{ bits}$ ($16\text{ bytes}$). |
-| **Payload Padding** | Length-Prefixed Boundary Padding | Nearest $256\text{-byte}$ boundary ($\lceil (L + 4) / 256 \rceil \times 256$). |
-| **Recovery Key** | CSPRNG Entropy + Crockford Base32 | $256\text{ bits}$ ($32\text{ bytes}$) raw entropy formatted into eight 4-character groups with Modulo-37 checksum. |
+| Component                    | Standard / Algorithm              | Parameters & Details                                                                                                                                                   |
+| :--------------------------- | :-------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Passphrase KDF**           | `Argon2id` (WASM via `hash-wasm`) | Memory: $65{,}536\text{ KiB}$ ($64\text{ MiB}$), Iterations: $3$, Parallelism: $1$, Salt: $16\text{ bytes}$ CSPRNG. Benchmark: $\sim 280\text{ ms}$ in Chrome/Firefox. |
+| **Domain Separation**        | `HKDF-SHA256` (RFC 5869)          | Hash: `SHA-256`, Length: $32\text{ bytes}$ ($256\text{ bits}$). Distinct `info` strings for each derived key.                                                          |
+| **Authenticated Encryption** | `AES-256-GCM` (Web Crypto)        | Key Length: $256\text{ bits}$, Nonce: $96\text{ bits}$ ($12\text{ bytes}$) CSPRNG, Auth Tag: $128\text{ bits}$ ($16\text{ bytes}$).                                    |
+| **Payload Padding**          | Length-Prefixed Boundary Padding  | Nearest $256\text{-byte}$ boundary ($\lceil (L + 4) / 256 \rceil \times 256$).                                                                                         |
+| **Recovery Key**             | CSPRNG Entropy + Crockford Base32 | $256\text{ bits}$ ($32\text{ bytes}$) raw entropy formatted into eight 4-character groups with Modulo-37 checksum.                                                     |
 
 ---
 
@@ -101,14 +101,14 @@ To prevent cross-protocol and cross-key confusion, derived keys use distinct dom
 
 Every encryption operation cryptographically binds the ciphertext to its exact database record and user context to prevent ciphertext-swapping attacks:
 
-| Ciphertext Target | AAD Format String |
-| :--- | :--- |
-| **Vault DEK Wrap** | `memoir:v1|dek-wrap|user:{userId}` |
-| **Recovery DEK Wrap** | `memoir:v1|recovery-wrap|user:{userId}` |
-| **Memory Payload** | `memoir:v1|memory|user:{userId}|id:{memoryId}` |
-| **Attachment Metadata** | `memoir:v1|attachment-meta|user:{userId}|id:{attachmentId}` |
-| **Attachment File Key Wrap** | `memoir:v1|file-key-wrap|user:{userId}|id:{attachmentId}` |
-| **Attachment Raw Blob** | `memoir:v1|attachment-blob|user:{userId}|id:{attachmentId}` |
+| Ciphertext Target            | AAD Format String |
+| :--------------------------- | :---------------- |
+| **Vault DEK Wrap**           | `memoir:v1        | dek-wrap        | user:{userId}` |
+| **Recovery DEK Wrap**        | `memoir:v1        | recovery-wrap   | user:{userId}` |
+| **Memory Payload**           | `memoir:v1        | memory          | user:{userId}  | id:{memoryId}`     |
+| **Attachment Metadata**      | `memoir:v1        | attachment-meta | user:{userId}  | id:{attachmentId}` |
+| **Attachment File Key Wrap** | `memoir:v1        | file-key-wrap   | user:{userId}  | id:{attachmentId}` |
+| **Attachment Raw Blob**      | `memoir:v1        | attachment-blob | user:{userId}  | id:{attachmentId}` |
 
 Any modification to `userId`, record `id`, or the AAD tag causes `AES-256-GCM` decryption to fail immediately with an authentication tag mismatch.
 
@@ -139,8 +139,8 @@ All stored ciphertexts conform to a strict, immutable envelope:
 export interface CiphertextEnvelope {
   version: 1;
   algorithm: 'AES-256-GCM';
-  nonce: string;       // 12-byte CSPRNG nonce encoded in base64url
-  ciphertext: string;  // Ciphertext concatenated with 16-byte auth tag, base64url
+  nonce: string; // 12-byte CSPRNG nonce encoded in base64url
+  ciphertext: string; // Ciphertext concatenated with 16-byte auth tag, base64url
 }
 ```
 

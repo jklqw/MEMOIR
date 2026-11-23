@@ -1,15 +1,24 @@
 /**
  * @memoir/crypto
- * Zero-knowledge client cryptography engine.
+ * Zero-knowledge client cryptography engine for Memoir.
  */
 
-export interface CiphertextEnvelope {
-  version: number;
-  algorithm: string;
-  nonce: string;
-  ciphertext: string;
-}
+// Types & Constants
+export * from './types.js';
 
-export const CRYPTO_ALGORITHM = 'AES-256-GCM';
-export const ENVELOPE_VERSION = 1;
-export const BLOCK_PADDING_BYTES = 256;
+// Utilities
+export * from './encoding.util.js';
+export * from './padding.js';
+export * from './exif.util.js';
+
+// Key Derivation
+export * from './kdf.js';
+
+// Recovery Key Engine
+export * from './recovery.js';
+
+// Envelope Cryptography
+export * from './envelope.js';
+
+// Attachment Cryptography
+export * from './attachment.js';
