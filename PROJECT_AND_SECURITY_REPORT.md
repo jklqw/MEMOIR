@@ -518,7 +518,34 @@ Operational metadata visible to the server for synchronization:
   - `pnpm lint` -> PASS (0 errors).
   - `node scripts/scan-secrets.mjs` -> PASS (scanned 205 tracked files, 0 secrets detected).
 - **Atomic Commit Ledger:**
-  - _(current)_ — `feat(ux): complete WCAG 2.2 AA accessibility pass, resilient error states, and account deletion`
+  - `2233de6` — `feat(ux): complete WCAG 2.2 AA accessibility pass, resilient error states, and account deletion`
+
+#### Milestone 7.2: Encrypted-Only IndexedDB Cache & Resilient Offline Sync Queue (Commit 42)
+
+- **Objective:** Architect a client-side offline-first persistence and queuing layer in IndexedDB (`memoir-offline-store-v1`) that strictly preserves the Zero-Knowledge Invariant (encrypted envelopes only, zero plaintext in database dumps), provides transparent offline fallback with RAM decryption, and handles automatic online queue flushing with optimistic timestamp conflict resolution.
+- **Implementation Summary:**
+  - Integrated `idb` and `fake-indexeddb` with schema versioning for two stores: `encrypted_memories` (indexed by `entryDate`) and `offline_sync_queue` (indexed by `status` and `timestamp`).
+  - **Zero-Knowledge Invariant Guarantee:** Cached objects and queued payloads strictly contain ciphertext envelopes (`ciphertext`, `nonce`, `algorithm`, `envelopeVersion`, `entryDate`), never unencrypted markdown, titles, moods, or private tags.
+  - Authored `apps/web/src/services/offlineCacheService.ts` for encrypted envelope caching, single/multi-record retrieval, and queue state operations (`enqueueAction`, `getPendingQueue`, `updateQueueItem`, `removeQueueItem`).
+  - Authored `apps/web/src/services/offlineSyncService.ts` for background queue synchronization:
+    - Automatically flushes upon `window.addEventListener('online')`.
+    - Handles `'CREATE'`, `'UPDATE'`, and `'DELETE'` operations with optimistic timestamp-based reconciliation.
+    - Handles HTTP 404 on `DELETE` gracefully (treated as synced).
+    - Fails safely on network faults by marking the failing item `FAILED`, recording error details, and preventing queue thrashing.
+  - Updated `apps/web/src/hooks/useMemories.ts` with offline fallback:
+    - `useMemoriesList`: caches encrypted envelopes on network success, falls back to IndexedDB encrypted cache on network failure, decrypts locally in RAM using volatile DEK.
+    - `useSaveMemory`: generates optimistic encrypted item and enqueues `'CREATE'` (with client UUID) or `'UPDATE'`.
+    - `useDeleteMemory`: removes from local cache and enqueues `'DELETE'`.
+  - Updated `NetworkStatusIndicator.tsx` with live sync status, pending count indicator, and synced confirmation banner.
+  - Authored automated test suite `apps/web/test/offline-sync.spec.ts` (6 tests) verifying the zero-knowledge invariant with canary string memory dump scans, cache sorting, queue lifecycle, API flush synchronization, 404 deletion handling, and resilient error recovery.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/web test test/offline-sync.spec.ts` -> 6 tests passed (100%).
+  - `pnpm --filter @memoir/web test` -> 30 tests passed across 6 test suites (100%).
+  - `pnpm typecheck` -> PASS across all 4 workspace packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors, 14 allowed warnings).
+  - `pnpm --filter @memoir/web build` -> PASS in 7.61s (0 errors).
+- **Atomic Commit Ledger:**
+  - _(current)_ — `feat(offline): implement encrypted-only IndexedDB cache and conflict-safe offline sync queue`
 
 ---
 
@@ -712,8 +739,8 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
   - `@memoir/api`: 165 integration and security regression tests across 24 test suites passing (100%).
-  - `@memoir/web`: 24 frontend, accessibility, and edge-state tests across 5 test suites passing (100%).
-- Web client builds deterministically with 100% self-hosted typography and zero external CDNs in 6.79s.
+  - `@memoir/web`: 30 frontend, accessibility, offline sync, and edge-state tests across 6 test suites passing (100%).
+- Web client builds deterministically with 100% self-hosted typography and zero external CDNs in 7.61s.
 
 ---
 
@@ -723,4 +750,5 @@ Phase 6 Application Security Hardening is 100% complete across all 8 dedicated s
 
 - **WCAG 2.2 AA Accessibility & Resilient Edge States (Commit 41):** Verified strict $\ge 7.0:1$ and $\ge 4.5:1$ contrast ratios, visible `:focus-visible` rings, `prefers-reduced-motion` compliance, accessible Skip-to-content landmark jumping, Dialog focus trap with focus restoration, Archival ErrorBoundary, Loading skeletons, and `Cmd/Ctrl+K` Command Palette.
 - **Deliberate Account Deletion (Commit 41):** Re-authentication password verification, explicit `"DELETE MY ACCOUNT"` confirmation, cascading PostgreSQL database wipe, physical disk/S3 file purge, session cookie invalidation, and honest 30-day disaster recovery backup retention disclosure verified with dedicated automated tests.
-- **Upcoming Milestone:** Encrypted-only IndexedDB cache and conflict-safe offline sync queue (Commit 42).
+- **Encrypted-Only IndexedDB Cache & Offline Sync Queue (Commit 42):** Implemented client-side offline store strictly enforcing the Zero-Knowledge Invariant (encrypted ciphertext envelopes only; verified canary plaintext never touches IndexedDB). Seamless offline fallback with volatile RAM decryption, optimistic mutation queuing, and automatic online sync queue flushing with conflict resolution.
+- **Upcoming Milestone:** Client-side Mood Insights, Time Capsules & private Anniversary Reminders (Commit 43).

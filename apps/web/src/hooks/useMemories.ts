@@ -7,6 +7,8 @@ import {
   buildEncryptedUpdateDto,
   decryptMemory,
 } from '../services/memoryCryptoService.js';
+import { offlineCacheService } from '../services/offlineCacheService.js';
+import { offlineSyncService } from '../services/offlineSyncService.js';
 import { useVaultStore } from '../stores/vaultStore.js';
 
 export function useMemoriesList(options?: { includeArchived?: boolean; entryDate?: string }) {
@@ -22,7 +24,25 @@ export function useMemoriesList(options?: { includeArchived?: boolean; entryDate
   return useQuery({
     queryKey: ['memories', options?.includeArchived, options?.entryDate, isUnlocked],
     queryFn: async (): Promise<DecryptedMemory[]> => {
-      const items = await api.get<MemoryItemResponse[]>(endpoint);
+      let items: MemoryItemResponse[] = [];
+
+      try {
+        items = await api.get<MemoryItemResponse[]>(endpoint);
+        // Opportunistically cache encrypted envelopes in IndexedDB (ZERO PLAINTEXT!)
+        void offlineCacheService.cacheEncryptedMemories(items);
+      } catch (networkErr) {
+        // Fallback to local encrypted cache if offline or network unreachable
+        try {
+          const cached = await offlineCacheService.getCachedEncryptedMemories();
+          if (cached.length > 0) {
+            items = cached;
+          } else {
+            throw networkErr;
+          }
+        } catch {
+          throw networkErr;
+        }
+      }
 
       // If vault is locked or DEK is absent, return masked empty bodies
       if (!isUnlocked || !dek || !user) {
@@ -35,6 +55,7 @@ export function useMemoriesList(options?: { includeArchived?: boolean; entryDate
           schemaVersion: 1,
         }));
       }
+
 
       // Concurrently decrypt all memory envelopes locally in RAM
       const decrypted = await Promise.all(
@@ -118,11 +139,39 @@ export function useSaveMemory() {
           userId: user.id,
         });
 
-        const updated = await api.patch<MemoryItemResponse>(
-          `/api/v1/memories/${params.id}`,
-          updateDto,
-        );
-        return decryptMemory(updated, dek, user.id);
+        try {
+          const updated = await api.patch<MemoryItemResponse>(
+            `/api/v1/memories/${params.id}`,
+            updateDto,
+          );
+          void offlineCacheService.cacheEncryptedMemory(updated);
+          return decryptMemory(updated, dek, user.id);
+        } catch {
+          // If offline or network unavailable, persist encrypted envelope locally and enqueue
+          const offlineItem: MemoryItemResponse = {
+            id: params.id,
+            userId: user.id,
+            entryDate: new Date(params.entryDate).toISOString(),
+            isPinned: params.isPinned ?? false,
+            isTimeCapsule: params.isTimeCapsule ?? false,
+            unlockAt: params.unlockAt ? new Date(params.unlockAt).toISOString() : null,
+            envelopeVersion: updateDto.envelopeVersion ?? 1,
+            algorithm: updateDto.algorithm ?? 'AES-256-GCM',
+            ciphertext: updateDto.ciphertext,
+            nonce: updateDto.nonce,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            archivedAt: null,
+          };
+          await offlineCacheService.cacheEncryptedMemory(offlineItem);
+          await offlineCacheService.enqueueAction(
+            'UPDATE',
+            params.id,
+            updateDto as unknown as Record<string, unknown>,
+          );
+          void offlineSyncService.refreshPendingCount();
+          return decryptMemory(offlineItem, dek, user.id);
+        }
       } else {
         // Create new memory with pre-bound AAD
         const createDto = await buildEncryptedCreateDto({
@@ -135,8 +184,37 @@ export function useSaveMemory() {
           userId: user.id,
         });
 
-        const created = await api.post<MemoryItemResponse>('/api/v1/memories', createDto);
-        return decryptMemory(created, dek, user.id);
+        try {
+          const created = await api.post<MemoryItemResponse>('/api/v1/memories', createDto);
+          void offlineCacheService.cacheEncryptedMemory(created);
+          return decryptMemory(created, dek, user.id);
+        } catch {
+          // If offline, generate temporary client UUID and queue
+          const syntheticId = crypto.randomUUID();
+          const offlineItem: MemoryItemResponse = {
+            id: syntheticId,
+            userId: user.id,
+            entryDate: new Date(params.entryDate).toISOString(),
+            isPinned: params.isPinned ?? false,
+            isTimeCapsule: params.isTimeCapsule ?? false,
+            unlockAt: params.unlockAt ? new Date(params.unlockAt).toISOString() : null,
+            envelopeVersion: createDto.envelopeVersion,
+            algorithm: createDto.algorithm,
+            ciphertext: createDto.ciphertext,
+            nonce: createDto.nonce,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            archivedAt: null,
+          };
+          await offlineCacheService.cacheEncryptedMemory(offlineItem);
+          await offlineCacheService.enqueueAction(
+            'CREATE',
+            syntheticId,
+            createDto as unknown as Record<string, unknown>,
+          );
+          void offlineSyncService.refreshPendingCount();
+          return decryptMemory(offlineItem, dek, user.id);
+        }
       }
     },
     onSuccess: () => {
@@ -150,13 +228,22 @@ export function useDeleteMemory() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      await api.delete(`/api/v1/memories/${id}`);
+      try {
+        await api.delete(`/api/v1/memories/${id}`);
+        void offlineCacheService.removeCachedEncryptedMemory(id);
+      } catch {
+        // If offline, remove from local cache and queue delete
+        await offlineCacheService.removeCachedEncryptedMemory(id);
+        await offlineCacheService.enqueueAction('DELETE', id);
+        void offlineSyncService.refreshPendingCount();
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['memories'] });
     },
   });
 }
+
 
 export function useTogglePin() {
   const queryClient = useQueryClient();
