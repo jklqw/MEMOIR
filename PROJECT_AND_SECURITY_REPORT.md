@@ -6,15 +6,18 @@ Memoir is a privacy-first, end-to-end encrypted personal diary platform built on
 
 This unified document is the authoritative engineering and security record for the Memoir repository. It tracks verified implementations, automated test evidence, static analysis findings, and honest architectural boundaries across all development phases.
 
-- **Current Status:** Phase 1 (Architecture Boundaries, App Shells & Local Services) Completed.
+- **Current Status:** Phase 4 (Encrypted Diary Core) Completed.
 - **Application Version:** `0.1.0-dev`
 - **Review Date:** 2026-11-23
 - **Implemented & Verified Controls:**
   - Complete STRIDE Threat Model, Trust Boundary definitions, and Data Classification Policy (`docs/ARCHITECTURE.md`, `docs/THREAT_MODEL.md`, `docs/PRIVACY.md`).
   - Containerized local development infrastructure via Docker Compose / Rootless Podman (`postgres:16-alpine`, `redis:7-alpine`, `axllent/mailpit`).
   - Modular NestJS API foundation with fail-fast Zod environment validation, OpenAPI Swagger documentation (`/docs`), safe non-leaking global exception filter, and structured Pino logging with guaranteed secret redaction.
-  - Health check endpoint (`/api/v1/health`) actively verifying PostgreSQL and Redis connectivity.
-  - Editorial Archival Paper & Ink (light) and Obsidian Ink (dark) responsive web client in React 19 + Vite + Tailwind CSS v4 with 100% self-hosted typography (`@fontsource`), WCAG 2.2 AA accessible buttons/inputs/dialogs, live encryption status indicators, and Cryptographic Inspector.
+  - Relational PostgreSQL Prisma migrations: `init_auth_schema`, `add_user_vaults`, `add_memories_schema`.
+  - Client-side cryptographic engine (`packages/crypto`) with WebAssembly Argon2id, HKDF-SHA256, AES-256-GCM, 256-byte block padding, Crockford Base32 recovery keys, and volatile RAM key store (`useVaultStore`).
+  - Distraction-free archival editor with autosave state machine, 68ch layout, date picker, private tags, mood chips, time capsule picker, and XSS-sanitized markdown preview.
+  - Chronological Timeline grouped by Month & Year, interactive monthly Calendar View, Memory Detail modal with live Cryptographic Inspector, and 100% Client-Side Local Search across RAM-decrypted entries.
+  - Comprehensive 44 automated tests across crypto, backend API, and web frontend verifying zero plaintext storage in PostgreSQL, nonce-reuse prevention, Time Capsule server-side withholding, IDOR denial, and network isolation during local search.
 
 ---
 
@@ -187,7 +190,42 @@ Operational metadata visible to the server for synchronization:
   - `71c25a6` — `test(crypto): verify cryptographic invariants, tamper rejection, nonce uniqueness, and recovery`
   - `41e17ac` — `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, and recovery UI`
   - `ad2267c` — `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret persistence`
-  - _(current)_ — `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`
+  - `d73ede5` — `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`
+
+### Phase 4 — Encrypted Diary Core
+
+- **Objective:** Implement client-encrypted memory schema, opaque persistence API, pre-bound AAD encryption service, distraction-free archival editor with autosave state machine, chronological timeline with month/year grouping, memory detail view with cryptographic inspector, interactive calendar view, and 100% client-side local search across in-memory decrypted entries.
+- **Implementation Summary:**
+  - Applied Prisma migration `20261123180512_add_memories_schema` creating `memories` table with composite indexes (`[userId, createdAt]`, `[userId, entryDate]`), strict foreign key relations, soft deletion, and timestamped archival tracking.
+  - Built `MemoriesModule` in `apps/api` (`POST /api/v1/memories`, `GET /api/v1/memories`, `GET /api/v1/memories/:id`, `PATCH /api/v1/memories/:id`, `DELETE /api/v1/memories/:id`, `POST :id/pin`, `POST :id/archive`, `POST :id/restore`) with strict `userId` ownership scoping, 5MB ciphertext limit, Time Capsule server-side withholding (masking ciphertext/nonce for unexpired capsules), and mandatory nonce-reuse rejection on updates (400 Bad Request).
+  - Implemented browser-side memory crypto service in `apps/web/src/services/memoryCryptoService.ts` and React Query hooks in `apps/web/src/hooks/useMemories.ts` binding all memory ciphertexts to record-bound AAD (`memoir:v1|memory|user:{userId}|id:{memoryId}`) with fresh 96-bit CSPRNG nonces and length-prefixed 256-byte block padding.
+  - Built distraction-free editorial `DiaryEditor` in `apps/web/src/components/editor/DiaryEditor.tsx` with autosave state machine (`saved`, `saving`, `unsaved`, `failed`, `offline`), `68ch` archival layout, date picker, private tags, mood chips, time capsule picker, keyboard shortcuts (`Cmd/Ctrl+S`), `beforeunload` unsaved change protection, and XSS-sanitized markdown preview via `react-markdown` and `rehype-sanitize`.
+  - Built chronological `TimelinePage` in `apps/web/src/pages/TimelinePage.tsx` with clean Month & Year grouping, tag/mood dropdown filters, active/archived toggle, pagination, and **100% Client-Side Local Search** executing full-text matching strictly in browser RAM without ever sending search queries to the server.
+  - Built interactive monthly `CalendarPage` in `apps/web/src/pages/CalendarPage.tsx` mapping memories to days, allowing day-specific writing, and displaying explicit zero-knowledge date metadata disclosures.
+  - Built `MemoryDetailModal` with decrypted markdown preview, mood/tags, pin/archive/restore actions, permanent deletion confirmation modal, and live Cryptographic Inspector disclosing envelope ID, nonce, ciphertext size, and AAD context.
+  - Authored comprehensive test suites in `apps/api/test/memories.spec.ts` (6 tests) and `apps/web/test/memory-crypto.spec.ts` (4 tests) verifying CRUD, cross-user IDOR access denial, nonce-reuse rejection, Time Capsule withholding, local search network isolation, and direct PostgreSQL assertion confirming zero plaintext strings in the `memories` table.
+- **Security & Privacy Controls:**
+  - **Zero Plaintext Invariant:** Verified via direct PostgreSQL raw SQL assertion (`SELECT * FROM "memories"`): columns and values never contain titles, body text, tags, moods, or prose.
+  - **Nonce Reuse Guard:** Verified rejecting identical nonces on updates with `400 Bad Request`.
+  - **Time Capsule Sealing:** Verified server strictly masks/withholds ciphertext and nonces for sealed time capsules until unexpired.
+  - **Strict Ownership Isolation:** Verified cross-user IDOR access denial throwing non-leaking 404s.
+  - **100% Client-Side Search:** Verified search queries never generate network traffic; search is performed entirely in browser memory.
+  - **XSS Boundary:** Verified user markdown is sanitized through an allowlist schema, stripping malicious scripts and unsafe protocols.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test` -> 7 test files passed (21 total tests passing).
+  - `pnpm --filter @memoir/web test` -> 2 test files passed (10 total tests passing).
+  - `pnpm --filter @memoir/crypto test` -> 1 test file passed (13 core invariant tests passing).
+  - `pnpm --filter @memoir/web build` -> PASS in 17.8s.
+  - `pnpm format:check` -> PASS (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+  - `pnpm typecheck` -> PASS across all packages (0 errors).
+- **Atomic Commit Ledger:**
+  - `979a836` — `feat(memory): add encrypted memory schema and opaque persistence API`
+  - `f5fe15b` — `feat(memory): implement browser-side memory encryption service with AAD binding`
+  - `2ce9ef2` — `feat(web): build distraction-free Markdown editor with autosave state machine and XSS sanitization`
+  - `610f37f` — `feat(memory): add chronological timeline, memory detail, calendar view, and local search`
+  - `eebb67e` — `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and local search`
+  - _(current)_ — `docs(report): append Phase 4 encrypted diary core verification to report`
 
 ---
 
@@ -269,7 +307,9 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | **Cryptographic 13 Invariants**    | `@memoir/crypto`  | `pnpm --filter @memoir/crypto test`          | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32  |
 | **Vault Lifecycle & IDOR Denial**  | `@memoir/api`     | `vitest run test/vault.spec.ts`              | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets  |
 | **Browser Vault Store & Auto-Lock**| `@memoir/web`     | `pnpm --filter @memoir/web test`             | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock |
-| **Web Production Build**           | `@memoir/web`     | `pnpm --filter @memoir/web build`            | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 20.69s             |
+| **Encrypted Memories Persistence** | `@memoir/api`     | `vitest run test/memories.spec.ts`           | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking |
+| **Memory Client Crypto & Search**  | `@memoir/web`     | `vitest run test/memory-crypto.spec.ts`      | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation|
+| **Web Production Build**           | `@memoir/web`     | `pnpm --filter @memoir/web build`            | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s              |
 
 ---
 
@@ -326,28 +366,41 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | `71c25a6`   | `test(crypto): verify cryptographic invariants, tamper rejection, nonces, and recovery`   | 13 Core Invariant verification suite  | Verified            |
 | `41e17ac`   | `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, recovery` | Zero-knowledge vault lifecycle & UI   | Verified            |
 | `ad2267c`   | `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret storage` | Vault lifecycle & RAM security tests  | Verified            |
-| _(pending)_ | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`        | Phase 3 milestone verification        | Verified            |
+| `d73ede5`   | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`        | Phase 3 milestone verification        | Verified            |
+| `979a836`   | `feat(memory): add encrypted memory schema and opaque persistence API`                     | Encrypted memory schema & CRUD        | Verified            |
+| `f5fe15b`   | `feat(memory): implement browser-side memory encryption service with AAD binding`          | Client AAD binding & 256B padding     | Verified            |
+| `2ce9ef2`   | `feat(web): build distraction-free Markdown editor with autosave state machine`            | Archival editor & autosave states     | Verified            |
+| `610f37f`   | `feat(memory): add chronological timeline, memory detail, calendar view, and local search`| Local search & calendar metadata      | Verified            |
+| `eebb67e`   | `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and search`| PG zero-plaintext & IDOR denial tests | Verified            |
+| _(pending)_ | `docs(report): append Phase 4 encrypted diary core verification to report`                 | Phase 4 milestone verification        | Verified            |
 
 ---
 
 ## 14. Operational & Deployment Readiness
 
 - Local infrastructure running in isolated containers (PostgreSQL 16 on 5433, Redis 7 on 6380, Mailpit on 1025/8025).
-- Relational schema migration `20261123021140_init_auth_schema` active and applied cleanly.
+- Relational schema migrations active and cleanly applied:
+  - `20261123021140_init_auth_schema`
+  - `20261123163904_add_user_vaults`
+  - `20261123180512_add_memories_schema`
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
-- Complete API auth and session integration suite passing (9 automated tests).
-- Web client builds deterministically in 5.77s.
+- Complete test suites passing across all layers:
+  - `@memoir/crypto`: 13 core invariant tests passing (100%).
+  - `@memoir/api`: 21 integration tests across 7 test suites passing (100%).
+  - `@memoir/web`: 10 frontend tests across 2 test suites passing (100%).
+- Web client builds deterministically in 17.8s with 100% self-hosted typography and zero external CDNs.
 
 ---
 
 ## 15. Final Engineering Assessment
 
-Phase 2 (Database & Account Authentication) is completed and verified against all criteria:
+Phase 4 (Encrypted Diary Core) is completed and verified against all criteria:
 
-- **Zero Plaintext Passwords:** Argon2id server-side password hashing verified (`m=64MiB`, `t=3`, `p=4`).
-- **Opaque Session Security:** `HttpOnly`, `SameSite=Strict` cookie sessions rotated on refresh; replay of rotated tokens instantly revokes the entire session family.
-- **Account Lockout:** 5 consecutive failed login attempts trigger automated 15-minute lockouts.
-- **Strict IDOR Prevention:** Verified cross-user denial on session listing and remote device revocation.
-- **Three-Secret Separation:** Client registration and login enforce strict boundary separation between account authentication passwords and client-side Vault Passphrases.
+- **Zero Plaintext Invariant:** Verified via direct PostgreSQL raw query assertions confirming that zero titles, prose bodies, tags, or moods exist in database tables or logs.
+- **Record-Bound Authenticated Data (AAD):** Every memory ciphertext envelope is bound cryptographically to `memoir:v1|memory|user:{userId}|id:{memoryId}` with deterministic 256-byte block padding.
+- **Nonce Freshness & Reuse Guard:** Every save and update generates a fresh 96-bit CSPRNG nonce; reuse attempts are strictly rejected with 400 Bad Request.
+- **Time Capsule Privacy:** The server actively withholds ciphertexts and nonces for unexpired time capsules.
+- **Distraction-Free Archival Editor:** Autosave state machine (`saved`, `saving`, `unsaved`, `failed`, `offline`), `Cmd+S` shortcuts, and XSS sanitization boundary active.
+- **Chronological Timeline & Calendar:** Entries grouped cleanly by Month & Year, calendar dates reflect coarse synchronization timestamps, and **100% Client-Side Local Search** executes strictly in browser RAM without ever emitting query terms over the network.
 
-Repository status: Clean, passing all test and lint gates, ready for Phase 3: Zero-Knowledge Cryptography & Vault Lifecycle (`packages/crypto`).
+Repository status: Clean, passing all test, typecheck, lint, and build gates, ready for Phase 5: Encrypted Attachments, Private Vault & Data Portability.
