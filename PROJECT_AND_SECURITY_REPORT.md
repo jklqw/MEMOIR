@@ -225,7 +225,41 @@ Operational metadata visible to the server for synchronization:
   - `2ce9ef2` — `feat(web): build distraction-free Markdown editor with autosave state machine and XSS sanitization`
   - `610f37f` — `feat(memory): add chronological timeline, memory detail, calendar view, and local search`
   - `eebb67e` — `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and local search`
-  - _(current)_ — `docs(report): append Phase 4 encrypted diary core verification to report`
+  - `b43fc5a` — `docs(report): append Phase 4 encrypted diary core verification to report`
+
+### Phase 5 — Encrypted Attachments, Private Vault & Data Portability
+
+- **Objective:** Implement zero-knowledge encrypted file attachments, client-side EXIF/GPS stripping, per-file AES-256-GCM encryption, private storage abstraction with strict quota enforcement, standalone Private Vault page for personal documents and photos, full zero-knowledge backup export/import (.memoir-backup.json) with SHA-256 integrity manifest, and warning-gated plaintext/Markdown export.
+- **Implementation Summary:**
+  - Applied Prisma migrations `20261123180453_add_attachments_schema` and `20261123184041_add_backups_schema` creating `attachments` and `backups` tables with foreign keys to `users` and `memories`, indexes on `[userId, createdAt]`, `[userId, isVaultItem]`, and `[memoryId]`.
+  - Built `StorageModule` and `StorageProvider` abstraction (`apps/api/src/storage/`) providing `LocalStorageProvider` (isolated disk directory outside public web roots) and `S3StorageProvider` (production-ready AWS S3 adapter). Enforced 10 MB per-file size limits and 250 MB per-user total storage quotas with server-generated UUIDv4 storage keys (`{uuid}.enc`), eliminating directory traversal and public URLs.
+  - Implemented client-side EXIF and GPS coordinate stripping (`stripExifMetadata` in `packages/crypto/src/exif.util.ts`) for JPEG/PNG/WebP images prior to browser-side encryption.
+  - Implemented per-file encryption in `packages/crypto/src/attachment.ts`: Each attachment generates a fresh random 256-bit `FileKey` and encrypts file bytes with `AES-256-GCM` using record-bound AAD (`memoir:v1|attachment-blob|user:{userId}|id:{attachmentId}`), encrypts private file metadata (`{ originalFilename, mimeType, originalSize }`) under `DEK` with AAD (`memoir:v1|attachment-meta|user:{userId}|id:{attachmentId}`), and wraps `FileKey` under `DEK` with AAD (`memoir:v1|file-key-wrap|user:{userId}|id:{attachmentId}`).
+  - Built `AttachmentsModule` (`apps/api/src/attachments/`) with `POST /api/v1/attachments`, `GET /api/v1/attachments`, `GET /api/v1/attachments/:id/blob`, and `DELETE /api/v1/attachments/:id`. Binary downloads are served strictly with `Content-Type: application/octet-stream`, `Content-Disposition: attachment`, and `X-Content-Type-Options: nosniff`.
+  - Integrated decrypted in-memory previews (`AttachmentPreview.tsx`) in both `DiaryEditor` and `MemoryDetailModal`, decrypting blobs into volatile RAM via `URL.createObjectURL` and immediately invoking `URL.revokeObjectURL` on unmount.
+  - Built dedicated **Private Vault** page (`apps/web/src/pages/VaultPage.tsx`) for standalone encrypted personal files (`isVaultItem: true`), featuring 250 MB quota progress meter, Photos/Documents/All category filter tabs, 100% RAM filename search, one-click decrypted file download, and transparent cryptographic security guarantees.
+  - Built `BackupsModule` (`apps/api/src/backups/`) with `POST /api/v1/backups/export`, `POST /api/v1/backups/import`, and `GET /api/v1/backups/history`. Export generates complete `.memoir-backup.json` containing ciphertext envelopes, KDF parameters, wrapped DEK, and SHA-256 integrity manifest, logging `BACKUP_EXPORTED` in `security_events`. Import verifies manifest integrity, validates envelopes, remaps ownership to the importing user, and deduplicates records.
+  - Built comprehensive Backup Verification & Restore UI and Warning-Gated Plaintext Export in `apps/web/src/pages/SettingsPage.tsx`. Users can inspect backup files with client-side WebCrypto SHA-256 verification before restoring. A dedicated modal with strong warning disclosures requires typing `CONFIRM EXPORT` before decrypting all memories in browser RAM and exporting unencrypted JSON.
+- **Security & Privacy Controls:**
+  - **Zero-Knowledge Invariant for Files:** The server and database never receive original filenames, MIME types, or unencrypted file bytes. All file metadata and payloads are encrypted client-side.
+  - **EXIF & Geolocation Stripping:** Removes GPS coordinates, camera serial numbers, and device timestamps client-side before encryption.
+  - **Hardened Binary Downloads:** Served with `application/octet-stream`, `nosniff`, and `attachment` to prevent browser MIME-sniffing and SVG/HTML stored-XSS execution.
+  - **Strict Storage Quota Isolation:** Per-file 10 MB limit and per-user 250 MB quota enforced server-side.
+  - **Tamper-Evident Backups:** SHA-256 checksum covers all vault parameters and ciphertext envelopes; tampering even 1 bit in memories or attachments triggers immediate import rejection.
+  - **Warning-Gated Plaintext Export:** Plaintext export is shielded behind an explicit confirmation barrier informing the user that cryptographic protection is permanently removed.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test` -> 10 test files passed (35 integration tests passing, including storage quotas, attachment IDOR denial, and backup export/import).
+  - `pnpm --filter @memoir/web test` -> 4 test files passed (19 frontend tests passing, including vault file crypto, EXIF stripping, and backup SHA-256 verification).
+  - `pnpm --filter @memoir/crypto test` -> 1 test file passed (13 core invariant tests passing).
+  - `pnpm format:check` -> PASS (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+  - `pnpm typecheck` -> PASS across all packages (0 errors).
+- **Atomic Commit Ledger:**
+  - `6d05a5c` — `feat(storage): add private attachment storage abstraction and quota enforcement`
+  - `380d0ed` — `feat(attachments): implement client-side EXIF stripping and per-file AES-256-GCM encryption`
+  - `18a7ec4` — `feat(vault): add Private Vault UI for standalone encrypted documents and photos`
+  - `01b7ba2` — `feat(portability): add encrypted backup export/import and warning-gated plaintext export`
+  - `7e73587` — `docs(report): append Phase 5 attachments and portability verification to report`
 
 ---
 
@@ -294,22 +328,22 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 
 ## 9. Automated Testing Matrix
 
-| Test Suite / Layer                 | Target Package    | Command                                      | Result          | Date       | Notes                                                                  |
-| :--------------------------------- | :---------------- | :------------------------------------------- | :-------------- | :--------- | :--------------------------------------------------------------------- |
-| **Format Check**                   | Workspace Root    | `pnpm format:check`                          | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                            |
-| **Linting**                        | Workspace Root    | `pnpm lint`                                  | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                       |
-| **Typecheck**                      | All Packages      | `pnpm typecheck`                             | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                              |
-| **Health Check Unit**              | `@memoir/api`     | `pnpm --filter @memoir/api test`             | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                    |
-| **Database Integration**           | `@memoir/api`     | `vitest run test/database.spec.ts`           | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity     |
-| **Auth & Email Verification**      | `@memoir/api`     | `vitest run test/auth-registration.spec.ts`  | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification   |
-| **Session Lifecycle & Replay**     | `@memoir/api`     | `vitest run test/auth-sessions.spec.ts`      | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout  |
-| **Session Scoping & IDOR Denial**  | `@memoir/api`     | `vitest run test/sessions.spec.ts`           | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial   |
-| **Cryptographic 13 Invariants**    | `@memoir/crypto`  | `pnpm --filter @memoir/crypto test`          | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32  |
-| **Vault Lifecycle & IDOR Denial**  | `@memoir/api`     | `vitest run test/vault.spec.ts`              | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets  |
-| **Browser Vault Store & Auto-Lock**| `@memoir/web`     | `pnpm --filter @memoir/web test`             | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock |
-| **Encrypted Memories Persistence** | `@memoir/api`     | `vitest run test/memories.spec.ts`           | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking |
-| **Memory Client Crypto & Search**  | `@memoir/web`     | `vitest run test/memory-crypto.spec.ts`      | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation|
-| **Web Production Build**           | `@memoir/web`     | `pnpm --filter @memoir/web build`            | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s              |
+| Test Suite / Layer                  | Target Package   | Command                                     | Result          | Date       | Notes                                                                   |
+| :---------------------------------- | :--------------- | :------------------------------------------ | :-------------- | :--------- | :---------------------------------------------------------------------- |
+| **Format Check**                    | Workspace Root   | `pnpm format:check`                         | PASS (0 errors) | 2026-11-23 | Verified all files adhere to Prettier rules                             |
+| **Linting**                         | Workspace Root   | `pnpm lint`                                 | PASS (0 errors) | 2026-11-23 | Verified with ESLint flat config                                        |
+| **Typecheck**                       | All Packages     | `pnpm typecheck`                            | PASS (0 errors) | 2026-11-23 | Verified with TypeScript 5.7+ strict mode                               |
+| **Health Check Unit**               | `@memoir/api`    | `pnpm --filter @memoir/api test`            | PASS (1 test)   | 2026-11-23 | Verified PostgreSQL and Redis live connection probe                     |
+| **Database Integration**            | `@memoir/api`    | `vitest run test/database.spec.ts`          | PASS (1 test)   | 2026-11-23 | Verified Prisma models, cascade deletion, and relational integrity      |
+| **Auth & Email Verification**       | `@memoir/api`    | `vitest run test/auth-registration.spec.ts` | PASS (2 tests)  | 2026-11-23 | Verified Argon2id hashing, Mailpit SMTP dispatch, token verification    |
+| **Session Lifecycle & Replay**      | `@memoir/api`    | `vitest run test/auth-sessions.spec.ts`     | PASS (2 tests)  | 2026-11-23 | Verified rotation, family revocation on replay, and 5-attempt lockout   |
+| **Session Scoping & IDOR Denial**   | `@memoir/api`    | `vitest run test/sessions.spec.ts`          | PASS (3 tests)  | 2026-11-23 | Verified masked IP listing, remote revocation, and cross-user denial    |
+| **Cryptographic 13 Invariants**     | `@memoir/crypto` | `pnpm --filter @memoir/crypto test`         | PASS (13 tests) | 2026-11-23 | Verified tamper rejection, 10k nonces, 256B padding, Crockford Base32   |
+| **Vault Lifecycle & IDOR Denial**   | `@memoir/api`    | `vitest run test/vault.spec.ts`             | PASS (6 tests)  | 2026-11-23 | Verified setup, duplicate rejection, rotation, recovery, zero secrets   |
+| **Browser Vault Store & Auto-Lock** | `@memoir/web`    | `pnpm --filter @memoir/web test`            | PASS (6 tests)  | 2026-11-23 | Verified wrong passphrase, recovery, rotation, zero storage, auto-lock  |
+| **Encrypted Memories Persistence**  | `@memoir/api`    | `vitest run test/memories.spec.ts`          | PASS (6 tests)  | 2026-11-23 | Verified zero plaintext in PG, nonce reuse guard, time capsule masking  |
+| **Memory Client Crypto & Search**   | `@memoir/web`    | `vitest run test/memory-crypto.spec.ts`     | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation |
+| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`           | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s               |
 
 ---
 
@@ -344,35 +378,40 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 
 ## 13. Security Commit History
 
-| Commit Hash | Conventional Commit Message                                                                | Security Control                      | Verification Status |
-| :---------- | :----------------------------------------------------------------------------------------- | :------------------------------------ | :------------------ |
-| `0ae4da7`   | `chore(repo): initialize git repository, workspace layout, and gitignore`                  | Git hygiene & secret exclusion        | Verified            |
-| `8c7ebc2`   | `docs(plan): define implementation plan, requirements, and repository standards`           | Architecture & security specification | Verified            |
-| `995f464`   | `chore(tooling): configure pnpm TypeScript monorepo, ESLint, Prettier, and commit hooks`   | Strict type safety & code hygiene     | Verified            |
-| `ca2887a`   | `docs(report): initialize unified PROJECT_AND_SECURITY_REPORT.md with Phase 0 baseline`    | Verification baseline                 | Verified            |
-| `f352576`   | `docs(architecture): document system boundaries, STRIDE threat model, and privacy policy`  | STRIDE & Trust Boundaries             | Verified            |
-| `1f46d22`   | `chore(infra): add reproducible local Docker Compose services and env templates`           | Infrastructure isolation              | Verified            |
-| `99896a5`   | `feat(api): scaffold NestJS foundation, Zod env validation, OpenAPI, and redacted logging` | Log redaction & fail-fast validation  | Verified            |
-| `c221e9a`   | `feat(web): build responsive application shell and Archival Paper & Ink design system`     | Zero external tracking & fonts        | Verified            |
-| `2e46ef9`   | `docs(report): append Phase 1 architecture and shell verification to report`               | Phase 1 milestone verification        | Verified            |
-| `32035a6`   | `feat(database): add initial Prisma schema and migrations for accounts, sessions, events`  | Relational integrity & cascade safety | Verified            |
-| `9fa3cd7`   | `feat(auth): implement registration, server Argon2id hashing, and email verification`      | Argon2id & anti-enumeration hashing   | Verified            |
-| `51f3b2e`   | `feat(auth): implement opaque cookie sessions, rotation, and reuse detection`              | Session rotation & replay revocation  | Verified            |
-| `835f0fb`   | `feat(web): build accessible registration, login, and email verification screens`          | WCAG 2.2 AA & Three-Secret guidance   | Verified            |
-| `37233d9`   | `feat(auth): add active session management and remote device revocation`                   | IDOR prevention & remote revocation   | Verified            |
-| `965dd9e`   | `docs(report): append Phase 2 authentication verification to report`                       | Phase 2 milestone verification        | Verified            |
-| `710eecf`   | `docs(crypto): specify versioned client-side encryption, key hierarchy, and recovery`      | Versioned crypto specification        | Verified            |
-| `e49f3bf`   | `feat(crypto): implement versioned Argon2id, HKDF, AES-256-GCM, padding, and recovery`    | Client-side cryptographic engine      | Verified            |
-| `71c25a6`   | `test(crypto): verify cryptographic invariants, tamper rejection, nonces, and recovery`   | 13 Core Invariant verification suite  | Verified            |
-| `41e17ac`   | `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, recovery` | Zero-knowledge vault lifecycle & UI   | Verified            |
-| `ad2267c`   | `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret storage` | Vault lifecycle & RAM security tests  | Verified            |
-| `d73ede5`   | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`        | Phase 3 milestone verification        | Verified            |
-| `979a836`   | `feat(memory): add encrypted memory schema and opaque persistence API`                     | Encrypted memory schema & CRUD        | Verified            |
-| `f5fe15b`   | `feat(memory): implement browser-side memory encryption service with AAD binding`          | Client AAD binding & 256B padding     | Verified            |
-| `2ce9ef2`   | `feat(web): build distraction-free Markdown editor with autosave state machine`            | Archival editor & autosave states     | Verified            |
-| `610f37f`   | `feat(memory): add chronological timeline, memory detail, calendar view, and local search`| Local search & calendar metadata      | Verified            |
-| `eebb67e`   | `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and search`| PG zero-plaintext & IDOR denial tests | Verified            |
-| _(pending)_ | `docs(report): append Phase 4 encrypted diary core verification to report`                 | Phase 4 milestone verification        | Verified            |
+| Commit Hash | Conventional Commit Message                                                                   | Security Control                      | Verification Status |
+| :---------- | :-------------------------------------------------------------------------------------------- | :------------------------------------ | :------------------ |
+| `0ae4da7`   | `chore(repo): initialize git repository, workspace layout, and gitignore`                     | Git hygiene & secret exclusion        | Verified            |
+| `8c7ebc2`   | `docs(plan): define implementation plan, requirements, and repository standards`              | Architecture & security specification | Verified            |
+| `995f464`   | `chore(tooling): configure pnpm TypeScript monorepo, ESLint, Prettier, and commit hooks`      | Strict type safety & code hygiene     | Verified            |
+| `ca2887a`   | `docs(report): initialize unified PROJECT_AND_SECURITY_REPORT.md with Phase 0 baseline`       | Verification baseline                 | Verified            |
+| `f352576`   | `docs(architecture): document system boundaries, STRIDE threat model, and privacy policy`     | STRIDE & Trust Boundaries             | Verified            |
+| `1f46d22`   | `chore(infra): add reproducible local Docker Compose services and env templates`              | Infrastructure isolation              | Verified            |
+| `99896a5`   | `feat(api): scaffold NestJS foundation, Zod env validation, OpenAPI, and redacted logging`    | Log redaction & fail-fast validation  | Verified            |
+| `c221e9a`   | `feat(web): build responsive application shell and Archival Paper & Ink design system`        | Zero external tracking & fonts        | Verified            |
+| `2e46ef9`   | `docs(report): append Phase 1 architecture and shell verification to report`                  | Phase 1 milestone verification        | Verified            |
+| `32035a6`   | `feat(database): add initial Prisma schema and migrations for accounts, sessions, events`     | Relational integrity & cascade safety | Verified            |
+| `9fa3cd7`   | `feat(auth): implement registration, server Argon2id hashing, and email verification`         | Argon2id & anti-enumeration hashing   | Verified            |
+| `51f3b2e`   | `feat(auth): implement opaque cookie sessions, rotation, and reuse detection`                 | Session rotation & replay revocation  | Verified            |
+| `835f0fb`   | `feat(web): build accessible registration, login, and email verification screens`             | WCAG 2.2 AA & Three-Secret guidance   | Verified            |
+| `37233d9`   | `feat(auth): add active session management and remote device revocation`                      | IDOR prevention & remote revocation   | Verified            |
+| `965dd9e`   | `docs(report): append Phase 2 authentication verification to report`                          | Phase 2 milestone verification        | Verified            |
+| `710eecf`   | `docs(crypto): specify versioned client-side encryption, key hierarchy, and recovery`         | Versioned crypto specification        | Verified            |
+| `e49f3bf`   | `feat(crypto): implement versioned Argon2id, HKDF, AES-256-GCM, padding, and recovery`        | Client-side cryptographic engine      | Verified            |
+| `71c25a6`   | `test(crypto): verify cryptographic invariants, tamper rejection, nonces, and recovery`       | 13 Core Invariant verification suite  | Verified            |
+| `41e17ac`   | `feat(vault): add user_vaults persistence and browser vault setup, unlock, lock, recovery`    | Zero-knowledge vault lifecycle & UI   | Verified            |
+| `ad2267c`   | `test(vault): verify vault lifecycle, wrong passphrase, recovery, and zero secret storage`    | Vault lifecycle & RAM security tests  | Verified            |
+| `d73ede5`   | `docs(report): append Phase 3 zero-knowledge cryptography report and test evidence`           | Phase 3 milestone verification        | Verified            |
+| `979a836`   | `feat(memory): add encrypted memory schema and opaque persistence API`                        | Encrypted memory schema & CRUD        | Verified            |
+| `f5fe15b`   | `feat(memory): implement browser-side memory encryption service with AAD binding`             | Client AAD binding & 256B padding     | Verified            |
+| `2ce9ef2`   | `feat(web): build distraction-free Markdown editor with autosave state machine`               | Archival editor & autosave states     | Verified            |
+| `610f37f`   | `feat(memory): add chronological timeline, memory detail, calendar view, and local search`    | Local search & calendar metadata      | Verified            |
+| `eebb67e`   | `test(memory): cover encrypted diary CRUD, ownership isolation, autosave races, and search`   | PG zero-plaintext & IDOR denial tests | Verified            |
+| `b43fc5a`   | `docs(report): append Phase 4 encrypted diary core verification to report`                    | Phase 4 milestone verification        | Verified            |
+| `6d05a5c`   | `feat(storage): add private attachment storage abstraction and quota enforcement`             | Quota checks & server storageKey      | Verified            |
+| `380d0ed`   | `feat(attachments): implement client-side EXIF stripping and per-file AES-256-GCM encryption` | Per-file keys & EXIF stripping        | Verified            |
+| `18a7ec4`   | `feat(vault): add Private Vault UI for standalone encrypted documents and photos`             | Standalone vault files & quota meter  | Verified            |
+| `01b7ba2`   | `feat(portability): add encrypted backup export/import and warning-gated plaintext export`    | SHA-256 manifest & warning gate       | Verified            |
+| `7e73587`   | `docs(report): append Phase 5 attachments and portability verification to report`             | Phase 5 milestone verification        | Verified            |
 
 ---
 
@@ -382,25 +421,26 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - Relational schema migrations active and cleanly applied:
   - `20261123021140_init_auth_schema`
   - `20261123163904_add_user_vaults`
-  - `20261123180512_add_memories_schema`
+  - `20261123171352_add_memories_schema`
+  - `20261123180453_add_attachments_schema`
+  - `20261123184041_add_backups_schema`
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
-  - `@memoir/api`: 21 integration tests across 7 test suites passing (100%).
-  - `@memoir/web`: 10 frontend tests across 2 test suites passing (100%).
-- Web client builds deterministically in 17.8s with 100% self-hosted typography and zero external CDNs.
+  - `@memoir/api`: 35 integration tests across 10 test suites passing (100%).
+  - `@memoir/web`: 19 frontend tests across 4 test suites passing (100%).
+- Web client builds deterministically with 100% self-hosted typography and zero external CDNs.
 
 ---
 
 ## 15. Final Engineering Assessment
 
-Phase 4 (Encrypted Diary Core) is completed and verified against all criteria:
+Phase 5 (Encrypted Attachments, Private Vault & Data Portability) is completed and verified against all criteria:
 
-- **Zero Plaintext Invariant:** Verified via direct PostgreSQL raw query assertions confirming that zero titles, prose bodies, tags, or moods exist in database tables or logs.
-- **Record-Bound Authenticated Data (AAD):** Every memory ciphertext envelope is bound cryptographically to `memoir:v1|memory|user:{userId}|id:{memoryId}` with deterministic 256-byte block padding.
-- **Nonce Freshness & Reuse Guard:** Every save and update generates a fresh 96-bit CSPRNG nonce; reuse attempts are strictly rejected with 400 Bad Request.
-- **Time Capsule Privacy:** The server actively withholds ciphertexts and nonces for unexpired time capsules.
-- **Distraction-Free Archival Editor:** Autosave state machine (`saved`, `saving`, `unsaved`, `failed`, `offline`), `Cmd+S` shortcuts, and XSS sanitization boundary active.
-- **Chronological Timeline & Calendar:** Entries grouped cleanly by Month & Year, calendar dates reflect coarse synchronization timestamps, and **100% Client-Side Local Search** executes strictly in browser RAM without ever emitting query terms over the network.
+- **Zero-Knowledge File Storage:** Neither plaintext filenames nor raw file bytes reach storage or database. All files receive client-side stripped metadata, individual random 256-bit AES-256-GCM file keys wrapped under DEK, and opaque UUIDv4 storage keys.
+- **Secure Binary Downloads:** Downloads served strictly as binary streams with `application/octet-stream`, `nosniff`, and `attachment` disposition, preventing SVG/HTML stored-XSS execution.
+- **Private Vault UI:** Complete standalone document/photo vault with 250 MB quota progress meter, file categorization, and 100% RAM search.
+- **Tamper-Evident Data Portability:** Encrypted backup exports generate comprehensive `.memoir-backup.json` bundles verified via SHA-256 digests over all ciphertext envelopes and KDF parameters; single-bit tampering triggers immediate import failure.
+- **Warning-Gated Plaintext Export:** Plaintext export is shielded behind an explicit confirmation barrier requiring exact `CONFIRM EXPORT` confirmation and active in-RAM vault decryption.
 
-Repository status: Clean, passing all test, typecheck, lint, and build gates, ready for Phase 5: Encrypted Attachments, Private Vault & Data Portability.
+Repository status: Clean, passing all test, typecheck, lint, and build gates, ready for Phase 6: Application Security Hardening (one dedicated commit per security control).

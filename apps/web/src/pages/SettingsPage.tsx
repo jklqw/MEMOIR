@@ -17,12 +17,12 @@ import type {
   BackupRestoreResult,
   DecryptedMemory,
   MemoirEncryptedBackup,
-  MemoryRecord,
+  MemoryItemResponse,
 } from '@memoir/shared';
 import { useAuth } from '../context/AuthContext.js';
 import { useVaultStore } from '../stores/vaultStore.js';
 import { api } from '../lib/api.js';
-import { decryptMemoryPayload } from '../services/memoryCryptoService.js';
+import { decryptMemory } from '../services/memoryCryptoService.js';
 import { Button } from '../components/ui/Button.js';
 import { Dialog } from '../components/ui/Dialog.js';
 import { Input } from '../components/ui/Input.js';
@@ -30,7 +30,7 @@ import { PassphraseRotationModal } from '../components/vault/PassphraseRotationM
 
 export function SettingsPage() {
   const { user } = useAuth();
-  const { dek, isLocked } = useVaultStore();
+  const { dek, isUnlocked } = useVaultStore();
 
   const [isRotationOpen, setIsRotationOpen] = useState(false);
   const [isPlaintextModalOpen, setIsPlaintextModalOpen] = useState(false);
@@ -188,7 +188,7 @@ export function SettingsPage() {
       return;
     }
 
-    if (isLocked || !dek || !user) {
+    if (!isUnlocked || !dek || !user) {
       setPlaintextError('Vault must be unlocked in browser RAM to decrypt memories for export.');
       return;
     }
@@ -197,12 +197,12 @@ export function SettingsPage() {
     setPlaintextError(null);
 
     try {
-      const res = await api.get<{ memories: MemoryRecord[] }>('memories');
+      const items = await api.get<MemoryItemResponse[]>('memories');
       const decryptedList: DecryptedMemory[] = [];
 
-      for (const m of res.memories) {
+      for (const item of items) {
         try {
-          const dec = await decryptMemoryPayload(m, dek, user.id);
+          const dec = await decryptMemory(item, dek, user.id);
           decryptedList.push(dec);
         } catch {
           // If a memory fails decryption, keep proceeding
@@ -216,10 +216,10 @@ export function SettingsPage() {
         totalMemories: decryptedList.length,
         memories: decryptedList.map((m) => ({
           entryDate: m.entryDate,
-          title: m.payload.title,
-          bodyMarkdown: m.payload.bodyMarkdown,
-          mood: m.payload.mood,
-          tags: m.payload.tags,
+          title: m.title,
+          bodyMarkdown: m.bodyMarkdown,
+          mood: m.mood,
+          tags: m.tags,
           isPinned: m.isPinned,
           createdAt: m.createdAt,
         })),
@@ -531,7 +531,7 @@ export function SettingsPage() {
             </p>
           </div>
 
-          {isLocked ? (
+          {!isUnlocked ? (
             <p className="text-xs text-destructive">
               Your vault is currently locked. You must unlock your vault first to allow local
               decryption.
@@ -562,7 +562,7 @@ export function SettingsPage() {
               size="sm"
               onClick={handleExportPlaintext}
               disabled={
-                isLocked || plaintextConfirmText !== 'CONFIRM EXPORT' || isExportingPlaintext
+                !isUnlocked || plaintextConfirmText !== 'CONFIRM EXPORT' || isExportingPlaintext
               }
               className="flex items-center gap-1.5"
             >

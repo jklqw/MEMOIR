@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { AppConfigModule } from '../config/config.module.js';
+import { ConfigModule } from '../config/config.module.js';
 import { AppConfigService } from '../config/config.service.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
 import { LocalStorageProvider } from './providers/local-storage.provider.js';
@@ -8,7 +8,7 @@ import { STORAGE_PROVIDER } from './storage.interface.js';
 import { StorageService } from './storage.service.js';
 
 @Module({
-  imports: [PrismaModule, AppConfigModule],
+  imports: [PrismaModule, ConfigModule],
   providers: [
     {
       provide: STORAGE_PROVIDER,
