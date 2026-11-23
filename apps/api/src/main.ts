@@ -1,0 +1,74 @@
+import { ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import { Logger } from 'nestjs-pino';
+import { AppModule } from './app.module.js';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
+import { AppConfigService } from './config/config.service.js';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  const config = app.get(AppConfigService);
+  const logger = app.get(Logger);
+  app.useLogger(logger);
+
+  // Security middlewares
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // Edge proxy or dedicated middleware handles strict CSP
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+  app.use(cookieParser());
+
+  // CORS configuration
+  app.enableCors({
+    origin: [config.get('WEB_URL'), 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+  });
+
+  // Global prefix
+  app.setGlobalPrefix('api/v1');
+
+  // Global pipes, filters, interceptors
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      forbidUnknownValues: true,
+    }),
+  );
+  app.useGlobalFilters(new AllExceptionsFilter());
+  app.useGlobalInterceptors(new TransformInterceptor());
+
+  // Swagger / OpenAPI documentation
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Memoir API')
+    .setDescription(
+      'Privacy-First, End-to-End Encrypted Personal Diary Platform API. All diary content is stored as opaque ciphertext envelopes.',
+    )
+    .setVersion('1.0.0')
+    .addCookieAuth('session')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('docs', app, document);
+
+  const port = config.get('PORT');
+  const host = config.get('HOST');
+
+  await app.listen(port, host);
+  logger.log(`Memoir API listening on http://${host}:${port}/api/v1 (Docs at /docs)`);
+}
+
+bootstrap().catch((err) => {
+  console.error('Fatal bootstrap failure:', err);
+  process.exit(1);
+});
