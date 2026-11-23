@@ -384,7 +384,34 @@ Operational metadata visible to the server for synchronization:
   - `pnpm typecheck` -> PASS across all 4 packages (0 errors).
   - `pnpm lint` -> PASS (0 errors).
 - **Atomic Commit Ledger:**
-  - _(current)_ — `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`
+  - `3909849` — `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`
+
+#### Control 6.6: Audit Logging, Redaction & Threat Heuristics (Commit 38)
+
+- **Objective:** Enforce strict secret redaction across Pino structured logs, implement threat detection heuristics flagging suspicious logins (unrecognized devices, new IP subnets, or logins succeeding after failed attempts), and deliver a comprehensive Security Dashboard UI with an active posture checklist and filterable monospace Security Audit Log.
+- **Implementation Summary:**
+  - Expanded Pino logger redaction configuration in `apps/api/src/app.module.ts` covering headers (`authorization`, `cookie`, `x-csrf-token`, `set-cookie`), credentials (`password`, `currentPassword`, `newPassword`, `passphrase`, `token`, `refreshToken`, `totpCode`, `totpSecret`, `backupCode`, `backupCodes`, `recoveryKey`, `recoveryKeyFingerprint`), and ciphertext envelopes (`ciphertext`, `wrappedDek`, `wrappedFileKey`, `encryptedMeta`, `titleCiphertext`, `bodyCiphertext`, `tagsCiphertext`, `moodCiphertext`, `attachmentMetaCiphertext`).
+  - Implemented suspicious login detection heuristics in `apps/api/src/auth/auth.service.ts`:
+    - Tracks historical sessions per user (devices and IP subnets).
+    - Flags unrecognized devices/browsers and new IP networks (`SUSPICIOUS_LOGIN`).
+    - Detects successful logins following consecutive failed attempts (`failedLoginAttempts > 0`).
+    - Emits structured `SUSPICIOUS_LOGIN` security events with masked IPs and descriptive context.
+  - Built `AuditModule` in `apps/api/src/audit/`:
+    - `GET /api/v1/audit/events`: Paginated, user-scoped security audit events with optional `eventType` filtering. Strictly prevents cross-user leakage (IDOR protection).
+    - `GET /api/v1/audit/posture`: Comprehensive account posture evaluation assessing email verification, zero-knowledge vault setup, TOTP 2FA, enrolled passkeys, session hygiene, and 30-day threat alerts.
+  - Built **Security Dashboard UI** in `apps/web/src/pages/SecurityPage.tsx`:
+    - Dynamic Security Posture Scorecard with 6 evaluation criteria and status score ('strong' / 'good' / 'action_needed').
+    - Suspicious Activity Alert Banner with 1-click remote device revocation.
+    - Filterable Monospace Security Audit Log with timestamp (UTC), color-coded event badges, origin IP/device, safe metadata, and pagination controls.
+  - Authored automated test suite in `apps/api/test/security-audit-redaction.spec.ts` (9 tests) verifying Pino secret redaction, suspicious login heuristics, user-scoped audit query filtering, and security posture evaluations.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/security-audit-redaction.spec.ts` -> 9 passed (100%).
+  - `pnpm --filter @memoir/api test` -> 16 test files passed (98 integration tests passing).
+  - `pnpm --filter @memoir/web build` -> PASS in 11.11s (0 errors).
+  - `pnpm typecheck` -> PASS across all workspace packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors).
+- **Atomic Commit Ledger:**
+  - _(current)_ — `security(audit): add logging redaction tests, suspicious login detection, and Security Dashboard UI`
 
 ---
 
@@ -473,10 +500,11 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | **Memory Client Crypto & Search**   | `@memoir/web`    | `vitest run test/memory-crypto.spec.ts`            | PASS (4 tests)  | 2026-11-23 | Verified AAD binding, unique nonces, and 100% RAM-only search isolation    |
 | **Security Headers & Helmet**       | `@memoir/api`    | `vitest run test/security-headers.spec.ts`         | PASS (5 tests)  | 2026-11-23 | Verified CSP, HSTS, X-Content-Type-Options, Referrer-Policy, CORS          |
 | **CSRF, DTO Allowlist & XSS**       | `@memoir/api`    | `vitest run test/security-csrf-validation.spec.ts` | PASS (10 tests) | 2026-11-23 | Verified Double-Submit token check, stripped unknown fields, XSS inputs    |
-| **Rate Limiting & Account Lockout** | `@memoir/api`    | `vitest run test/security-ratelimit.spec.ts`       | PASS (6 tests)  | 2026-11-23 | Verified proxy IP isolation, Redis TTL, 5-failure lockout, success reset   |
-| **TOTP 2FA & Password Lifecycle**   | `@memoir/api`    | `vitest run test/security-2fa-lifecycle.spec.ts`   | PASS (15 tests) | 2026-11-23 | Verified KMS AES-GCM, single-use backup codes, and Three-Secret separation |
-| **WebAuthn Passkeys & Vault Guard** | `@memoir/api`    | `vitest run test/security-passkeys.spec.ts`        | PASS (14 tests) | 2026-11-23 | Verified FIDO2 passkeys, replay counter, IDOR checks, zero-knowledge lock  |
-| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`                  | PASS (0 errors) | 2026-11-23 | Built Vite bundle with self-hosted bundled fonts in 17.8s                  |
+| **Rate Limiting & Account Lockout** | `@memoir/api`    | `vitest run test/security-ratelimit.spec.ts`        | PASS (6 tests)  | 2026-11-23 | Verified proxy IP isolation, Redis TTL, 5-failure lockout, success reset   |
+| **TOTP 2FA & Password Lifecycle**   | `@memoir/api`    | `vitest run test/security-2fa-lifecycle.spec.ts`    | PASS (15 tests) | 2026-11-23 | Verified KMS AES-GCM, single-use backup codes, and Three-Secret separation |
+| **WebAuthn Passkeys & Vault Guard** | `@memoir/api`    | `vitest run test/security-passkeys.spec.ts`         | PASS (14 tests) | 2026-11-23 | Verified FIDO2 passkeys, replay counter, IDOR checks, zero-knowledge lock  |
+| **Audit Redaction & Threat Heuristics**| `@memoir/api` | `vitest run test/security-audit-redaction.spec.ts`  | PASS (9 tests)  | 2026-11-24 | Verified Pino secret redaction, suspicious login heuristics, audit viewer |
+| **Web Production Build**            | `@memoir/web`    | `pnpm --filter @memoir/web build`                   | PASS (0 errors) | 2026-11-24 | Built Vite bundle with self-hosted bundled fonts in 11.11s                 |
 
 ---
 
@@ -549,7 +577,8 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 | `c1082c3`   | `security(csrf-validation): enforce CSRF protection, strict DTO allowlists, and XSS regression tests`   | Double-Submit CSRF & DTO allowlist    | Verified            |
 | `f513799`   | `security(ratelimit): enforce proxy-aware Redis rate limiting and exponential account lockout`          | Proxy-Aware Rate Limiting & Lockout   | Verified            |
 | `0d11373`   | `security(2fa): implement TOTP 2FA, KMS-encrypted secrets, hashed backup codes, and password lifecycle` | RFC 6238 TOTP & KMS Secret Encryption | Verified            |
-| _(current)_ | `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`           | FIDO2 WebAuthn & Vault Lock Boundary  | Verified            |
+| `3909849`   | `security(passkeys): implement WebAuthn Passkeys with explicit zero-knowledge vault boundary`           | FIDO2 WebAuthn & Vault Lock Boundary  | Verified            |
+| _(current)_ | `security(audit): add logging redaction tests, suspicious login detection, and Security Dashboard UI`   | Pino Redaction & Threat Dashboard UI  | Verified            |
 
 ---
 
@@ -567,7 +596,7 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
-  - `@memoir/api`: 89 integration tests across 15 test suites passing (100%).
+  - `@memoir/api`: 98 integration tests across 16 test suites passing (100%).
   - `@memoir/web`: 19 frontend tests across 4 test suites passing (100%).
 - Web client builds deterministically with 100% self-hosted typography and zero external CDNs.
 
@@ -582,4 +611,5 @@ Phase 6 Application Security Hardening is advancing under the strict One Commit 
 - **Rate Limiting & Lockout (Commit 35):** Proxy-aware Redis-backed rate limiting and exponential account lockout active.
 - **TOTP 2FA & Password Lifecycle (Commit 36):** RFC 6238 TOTP, KMS AES-256-GCM encrypted secrets, and single-use hashed backup codes implemented.
 - **Passkeys (Commit 37):** WebAuthn FIDO2 authentication landed with strict replay protection and zero-knowledge vault isolation.
-- **Upcoming Controls:** Audit logging & threat heuristics (Commit 38), Consolidated security regression suite (Commit 39), and Security CI/CD, secret scanning & dependency audits (Commit 40).
+- **Audit Logging & Threat Heuristics (Commit 38):** Pino secret redaction verified, suspicious login detection heuristics active, and Security Dashboard UI with monospace audit log delivered.
+- **Upcoming Controls:** Consolidated security regression suite (Commit 39) and Security CI/CD, secret scanning & dependency audits (Commit 40).

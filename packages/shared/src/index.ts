@@ -391,3 +391,34 @@ export interface BackupRestoreResult {
   skippedMemoriesCount: number;
   skippedAttachmentsCount: number;
 }
+
+/**
+ * Security Audit Event Response
+ */
+export interface SecurityEventResponse {
+  id: string;
+  eventType: string;
+  safeMetadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+/**
+ * Security Posture Checklist & Overview Response
+ */
+export interface SecurityPostureCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  description: string;
+}
+
+export interface SecurityPostureResponse {
+  emailVerified: boolean;
+  vaultConfigured: boolean;
+  totpEnabled: boolean;
+  passkeyCount: number;
+  activeSessionCount: number;
+  recentSuspiciousLogins: number;
+  overallScore: 'strong' | 'good' | 'action_needed';
+  checks: SecurityPostureCheck[];
+}

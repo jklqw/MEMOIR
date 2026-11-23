@@ -114,6 +114,7 @@ export class AuthService {
     userAgent?: string,
     ip?: string,
     loginMetadata?: Record<string, unknown>,
+    suspiciousContext?: { previousFailedAttempts?: number },
   ): Promise<{ user: { id: string; email: string }; rawToken: string }> {
     const rawToken = `memoir_s_${crypto.randomBytes(32).toString('hex')}`;
     const tokenHash = this.hashToken(rawToken);
@@ -121,6 +122,48 @@ export class AuthService {
     const { deviceLabel, userAgentSummary } = parseDeviceLabel(userAgent);
     const ipMasked = maskIp(ip);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    // Suspicious Login Heuristics Evaluation
+    const pastSessions = await this.prisma.session.findMany({
+      where: { userId: user.id },
+      select: { deviceLabel: true, ipMaskedOrHash: true },
+      take: 50,
+    });
+
+    const suspiciousReasons: string[] = [];
+    if (suspiciousContext?.previousFailedAttempts && suspiciousContext.previousFailedAttempts > 0) {
+      suspiciousReasons.push(
+        `Login succeeded after ${suspiciousContext.previousFailedAttempts} failed attempt(s)`,
+      );
+    }
+
+    if (pastSessions.length > 0) {
+      const knownDevices = new Set(pastSessions.map((s) => s.deviceLabel));
+      const knownIps = new Set(pastSessions.map((s) => s.ipMaskedOrHash));
+
+      if (deviceLabel && !knownDevices.has(deviceLabel)) {
+        suspiciousReasons.push(`New or unrecognized device: ${deviceLabel}`);
+      }
+      if (ipMasked && !knownIps.has(ipMasked)) {
+        suspiciousReasons.push(`New IP address or network subnet: ${ipMasked}`);
+      }
+    }
+
+    if (suspiciousReasons.length > 0) {
+      await this.prisma.securityEvent.create({
+        data: {
+          userId: user.id,
+          eventType: SecurityEventType.SUSPICIOUS_LOGIN,
+          safeMetadata: {
+            reasons: suspiciousReasons,
+            deviceLabel,
+            ipMasked,
+            failedAttemptsPreceding: suspiciousContext?.previousFailedAttempts || 0,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
 
     await this.prisma.session.create({
       data: {
@@ -227,7 +270,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new BadRequestException('Invalid or expired email verification token.');
+      throw new BadRequestException('Invalid or expired email verification link.');
     }
 
     await this.prisma.user.update({
@@ -333,6 +376,8 @@ export class AuthService {
       throw new UnauthorizedException('Please verify your email address before logging in.');
     }
 
+    const previousFailedAttempts = user.failedLoginAttempts;
+
     // Reset failed login attempts on successful password verification
     if (user.failedLoginAttempts > 0 || user.lockedUntil) {
       await this.prisma.user.update({
@@ -389,7 +434,9 @@ export class AuthService {
           throw new UnauthorizedException('Invalid two-factor authentication code.');
         }
 
-        return this.createSessionForUser(user, userAgent, ip);
+        return this.createSessionForUser(user, userAgent, ip, undefined, {
+          previousFailedAttempts,
+        });
       }
 
       // 2FA required: issue short-lived challenge token
@@ -406,7 +453,7 @@ export class AuthService {
       };
     }
 
-    return this.createSessionForUser(user, userAgent, ip);
+    return this.createSessionForUser(user, userAgent, ip, undefined, { previousFailedAttempts });
   }
 
   /**
@@ -778,7 +825,7 @@ export class AuthService {
 
       this.logger.warn(`Session replay detected for family: ${session.familyId}. Family revoked.`);
       throw new UnauthorizedException(
-        'Security alert: Session replay detected. Please log in again.',
+        'Security warning: Session token reuse detected. All active sessions in this family have been revoked.',
       );
     }
 
@@ -1127,6 +1174,8 @@ export class AuthService {
       },
     });
 
+    const previousFailedAttempts = cred.user.failedLoginAttempts;
+
     // Reset failed login attempts
     await this.prisma.user.update({
       where: { id: cred.userId },
@@ -1136,10 +1185,16 @@ export class AuthService {
       },
     });
 
-    return this.createSessionForUser({ id: cred.user.id, email: cred.user.email }, userAgent, ip, {
-      method: 'passkey',
-      credentialId: cred.credentialId,
-    });
+    return this.createSessionForUser(
+      { id: cred.user.id, email: cred.user.email },
+      userAgent,
+      ip,
+      {
+        method: 'passkey',
+        credentialId: cred.credentialId,
+      },
+      { previousFailedAttempts },
+    );
   }
 
   /**

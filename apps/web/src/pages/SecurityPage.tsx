@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PasskeyResponse, SessionResponse } from '@memoir/shared';
+import type {
+  PasskeyResponse,
+  SecurityEventResponse,
+  SecurityPostureResponse,
+  SessionResponse,
+} from '@memoir/shared';
 import {
+  Activity,
   AlertCircle,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Copy,
+  Filter,
   Fingerprint,
   Globe,
   KeyRound,
@@ -80,6 +89,39 @@ export function SecurityPage() {
   } = useQuery<PasskeyResponse[]>({
     queryKey: ['passkeys'],
     queryFn: () => api.get<PasskeyResponse[]>('/api/v1/auth/passkeys'),
+  });
+
+  // Security Posture Evaluation Query
+  const { data: posture, refetch: refetchPosture } = useQuery<SecurityPostureResponse>({
+    queryKey: ['security-posture'],
+    queryFn: () => api.get<SecurityPostureResponse>('/api/v1/audit/posture'),
+  });
+
+  // Security Audit Events Query
+  const [auditFilter, setAuditFilter] = useState<string>('ALL');
+  const [auditPage, setAuditPage] = useState<number>(0);
+  const auditLimit = 15;
+
+  const {
+    data: auditData,
+    isLoading: isAuditLoading,
+    refetch: refetchAudit,
+  } = useQuery<{
+    events: SecurityEventResponse[];
+    total: number;
+    limit: number;
+    offset: number;
+  }>({
+    queryKey: ['security-audit-events', auditFilter, auditPage],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set('limit', String(auditLimit));
+      params.set('offset', String(auditPage * auditLimit));
+      if (auditFilter !== 'ALL') {
+        params.set('eventType', auditFilter);
+      }
+      return api.get(`/api/v1/audit/events?${params.toString()}`);
+    },
   });
 
   const revokeMutation = useMutation({
@@ -175,7 +217,7 @@ export function SecurityPage() {
     setIsSubmittingDisable(true);
     try {
       await api.post('/api/v1/auth/2fa/disable', {
-        currentPassword,
+        currentPassword: disablePassword,
         totpCode: disableTotpCode.trim(),
       });
       setIsDisabling2FaOpen(false);
@@ -302,88 +344,186 @@ export function SecurityPage() {
         </div>
       )}
 
-      {/* Security Posture Checklist */}
+      {/* Security Posture Checklist & Status Score */}
       <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <Shield className="w-4 h-4 text-accent stroke-[1.5]" />
-          <span>Security Posture Checklist</span>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-paper border border-border flex items-center justify-center shrink-0">
+              {posture?.overallScore === 'strong' ? (
+                <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 stroke-[1.5]" />
+              ) : posture?.overallScore === 'good' ? (
+                <Shield className="w-5 h-5 text-accent stroke-[1.5]" />
+              ) : (
+                <ShieldAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 stroke-[1.5]" />
+              )}
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-ink flex items-center gap-2">
+                <span>Account Security Posture</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase ${
+                    posture?.overallScore === 'strong'
+                      ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                      : posture?.overallScore === 'good'
+                        ? 'bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border border-sky-300 dark:border-sky-800'
+                        : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                  }`}
+                >
+                  {posture?.overallScore === 'strong'
+                    ? 'Strong Protection'
+                    : posture?.overallScore === 'good'
+                      ? 'Standard Protection'
+                      : 'Action Recommended'}
+                </span>
+              </div>
+              <p className="text-xs text-ink-muted">
+                Zero-knowledge key isolation, multi-factor authentication, and threat monitoring.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void refetchPosture()}
+            className="text-xs self-start sm:self-auto"
+            title="Re-evaluate security posture"
+          >
+            <RotateCcw className="w-3.5 h-3.5 mr-1" strokeWidth={1.5} />
+            Re-evaluate
+          </Button>
         </div>
 
-        <div className="space-y-2.5 text-xs">
-          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
-            <div>
-              <span className="text-ink font-medium block">Zero-Knowledge Invariant</span>
-              <span className="text-[11px] text-ink-muted">
-                Plaintext memory strings and raw encryption keys never leave browser RAM
-              </span>
-            </div>
-            <span className="font-mono text-accent text-[11px] px-2 py-0.5 rounded bg-accent/10">
-              Enforced
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
-            <div>
-              <span className="text-ink font-medium block">Two-Factor Authentication (TOTP)</span>
-              <span className="text-[11px] text-ink-muted">
-                KMS AES-256-GCM encrypted secrets, SHA-256 hashed single-use backup codes
-              </span>
-            </div>
-            <span
-              className={`font-mono text-[11px] px-2 py-0.5 rounded ${
-                user?.totpEnabled
-                  ? 'bg-accent/10 text-accent font-semibold'
-                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+        {/* Posture Checks Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+          {(
+            posture?.checks || [
+              {
+                id: 'zero_knowledge_vault',
+                label: 'Zero-Knowledge Vault',
+                passed: true,
+                description: 'Client-side AES-256-GCM encryption with 256-byte block padding.',
+              },
+              {
+                id: 'two_factor_auth',
+                label: 'Two-Factor Authentication (TOTP)',
+                passed: !!user?.totpEnabled,
+                description: user?.totpEnabled
+                  ? 'RFC 6238 TOTP active with encrypted secrets.'
+                  : 'Add a second factor to secure your account.',
+              },
+              {
+                id: 'webauthn_passkeys',
+                label: 'FIDO2 / WebAuthn Passkeys',
+                passed: passkeys.length > 0,
+                description:
+                  passkeys.length > 0
+                    ? `${passkeys.length} biometric passkey(s) registered.`
+                    : 'Phishing-resistant biometric sign-in available.',
+              },
+              {
+                id: 'argon2id_kdf',
+                label: 'Argon2id Memory Hardening',
+                passed: true,
+                description:
+                  'Server password hashing (m=64MiB, t=3, p=4) and client KEK derivation.',
+              },
+              {
+                id: 'session_hygiene',
+                label: 'Device & Session Hygiene',
+                passed: sessions.length <= 5,
+                description: `${sessions.length} active device session(s) authorized.`,
+              },
+              {
+                id: 'threat_monitoring',
+                label: 'Suspicious Activity Monitoring',
+                passed: (posture?.recentSuspiciousLogins ?? 0) === 0,
+                description:
+                  (posture?.recentSuspiciousLogins ?? 0) === 0
+                    ? 'No anomalous or suspicious logins detected.'
+                    : `${posture?.recentSuspiciousLogins} suspicious login alert(s) detected.`,
+              },
+            ]
+          ).map((check) => (
+            <div
+              key={check.id}
+              className={`p-3 rounded-md border text-xs flex items-start gap-2.5 transition-colors ${
+                check.passed
+                  ? 'bg-paper border-border/80 text-ink'
+                  : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40 text-ink'
               }`}
             >
-              {user?.totpEnabled ? 'Active' : 'Disabled'}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
-            <div>
-              <span className="text-ink font-medium block">WebAuthn Passkeys (FIDO2)</span>
-              <span className="text-[11px] text-ink-muted">
-                Hardware-bound biometric or security key authentication with server session
-                isolation
-              </span>
+              {check.passed ? (
+                <CheckCircle2
+                  className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
+                  strokeWidth={1.5}
+                />
+              ) : (
+                <AlertCircle
+                  className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+                  strokeWidth={1.5}
+                />
+              )}
+              <div className="space-y-0.5">
+                <div className="font-medium flex items-center gap-1.5">
+                  <span>{check.label}</span>
+                </div>
+                <div className="text-[11px] text-ink-muted leading-relaxed">
+                  {check.description}
+                </div>
+              </div>
             </div>
-            <span
-              className={`font-mono text-[11px] px-2 py-0.5 rounded ${
-                passkeys.length > 0
-                  ? 'bg-accent/10 text-accent font-semibold'
-                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-              }`}
-            >
-              {passkeys.length > 0 ? `${passkeys.length} Active` : 'Available'}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
-            <div>
-              <span className="text-ink font-medium block">Account Password Hash</span>
-              <span className="text-[11px] text-ink-muted">
-                Server-side memory-hard Argon2id (m=64MiB, t=3, p=4)
-              </span>
-            </div>
-            <span className="font-mono text-accent text-[11px] px-2 py-0.5 rounded bg-accent/10">
-              Argon2id
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between p-2.5 bg-paper border border-border rounded">
-            <div>
-              <span className="text-ink font-medium block">Session Security & Rotation</span>
-              <span className="text-[11px] text-ink-muted">
-                Opaque HttpOnly cookies, family rotation, and replay detection
-              </span>
-            </div>
-            <span className="font-mono text-accent text-[11px] px-2 py-0.5 rounded bg-accent/10">
-              Active
-            </span>
-          </div>
+          ))}
         </div>
       </div>
+
+      {/* Suspicious Login Activity Alert Banner */}
+      {posture?.recentSuspiciousLogins && posture.recentSuspiciousLogins > 0 ? (
+        <div
+          role="alert"
+          className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+        >
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center justify-center shrink-0">
+              <ShieldAlert
+                className="w-4 h-4 text-amber-700 dark:text-amber-300"
+                strokeWidth={1.5}
+              />
+            </div>
+            <div>
+              <div className="font-semibold text-sm">
+                Suspicious Login Activity Detected ({posture.recentSuspiciousLogins} event
+                {posture.recentSuspiciousLogins > 1 ? 's' : ''})
+              </div>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5">
+                Unrecognized devices, new IP subnets, or logins following failed attempts were
+                detected in the last 30 days.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setAuditFilter('SUSPICIOUS_LOGIN');
+                setAuditPage(0);
+              }}
+              className="text-xs bg-amber-100 dark:bg-amber-900/60 hover:bg-amber-200 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100"
+            >
+              Filter Audit Log
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={revokeAllMutation.isPending || sessions.length <= 1}
+              onClick={() => revokeAllMutation.mutate()}
+              className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40"
+            >
+              Revoke Other Devices
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Two-Factor Authentication Management */}
       <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
@@ -963,6 +1103,196 @@ export function SecurityPage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Filterable Monospace Security Audit Log */}
+      <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <Activity className="w-4 h-4 text-accent stroke-[1.5]" />
+            <span>Security Audit Log</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refetchAudit()}
+              className="text-xs"
+              title="Refresh security audit log"
+            >
+              <RotateCcw className="w-3.5 h-3.5 mr-1" strokeWidth={1.5} />
+              Refresh Log
+            </Button>
+          </div>
+        </div>
+
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Tamper-evident, filterable record of authentication attempts, session revocations, vault
+          operations, and credential updates. Passwords, keys, and ciphertexts are permanently
+          redacted.
+        </p>
+
+        {/* Filter Controls */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+          <span className="text-[11px] font-medium text-ink-muted mr-1 flex items-center gap-1">
+            <Filter className="w-3 h-3" strokeWidth={1.5} />
+            Filter:
+          </span>
+          {[
+            { label: 'All Events', value: 'ALL' },
+            { label: 'Logins', value: 'LOGIN_SUCCESS' },
+            { label: 'Suspicious Logins', value: 'SUSPICIOUS_LOGIN' },
+            { label: 'Failed Logins', value: 'LOGIN_FAILED' },
+            { label: 'Lockouts', value: 'LOCKOUT_TRIGGERED' },
+            { label: 'Vault Created', value: 'VAULT_CREATED' },
+            { label: 'Passphrase Rotated', value: 'VAULT_PASSPHRASE_ROTATED' },
+            { label: 'Recovery Key Used', value: 'RECOVERY_KEY_USED' },
+            { label: 'Password Changed', value: 'PASSWORD_CHANGED' },
+            { label: '2FA Updated', value: 'TOTP_ENABLED' },
+            { label: 'Passkeys', value: 'PASSKEY_ADDED' },
+            { label: 'Sessions Revoked', value: 'SESSION_REVOKED' },
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => {
+                setAuditFilter(item.value);
+                setAuditPage(0);
+              }}
+              className={`px-2 py-1 rounded text-[11px] font-mono transition-colors ${
+                auditFilter === item.value
+                  ? 'bg-ink text-paper font-semibold shadow-xs'
+                  : 'bg-paper hover:bg-surface border border-border text-ink-muted hover:text-ink'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Monospace Audit Log Container */}
+        {isAuditLoading ? (
+          <div className="py-8 text-center text-xs text-ink-muted">
+            <div className="w-5 h-5 border-2 border-border border-t-ink rounded-full animate-spin mx-auto mb-2" />
+            Loading security audit log...
+          </div>
+        ) : !auditData || auditData.events.length === 0 ? (
+          <div className="py-8 text-center text-xs text-ink-muted bg-paper border border-border rounded font-mono">
+            No audit events found for current filter.
+          </div>
+        ) : (
+          <div className="border border-border rounded-md overflow-hidden bg-paper">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse font-mono text-[11px]">
+                <thead>
+                  <tr className="border-b border-border bg-surface text-ink-muted font-sans text-[11px] uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Timestamp (UTC)</th>
+                    <th className="py-2.5 px-3">Event Type</th>
+                    <th className="py-2.5 px-3">Origin / Device</th>
+                    <th className="py-2.5 px-3">Metadata & Context</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {auditData.events.map((ev) => {
+                    const isWarning =
+                      ev.eventType === 'SUSPICIOUS_LOGIN' ||
+                      ev.eventType === 'LOGIN_FAILED' ||
+                      ev.eventType === 'LOCKOUT_TRIGGERED';
+                    const isSuccess =
+                      ev.eventType === 'LOGIN_SUCCESS' ||
+                      ev.eventType === 'VAULT_CREATED' ||
+                      ev.eventType === 'TOTP_ENABLED' ||
+                      ev.eventType === 'PASSKEY_ADDED' ||
+                      ev.eventType === 'EMAIL_VERIFIED';
+
+                    const meta = ev.safeMetadata || {};
+                    const ip = (meta.ipMasked as string) || '—';
+                    const device = (meta.deviceLabel as string) || '';
+
+                    return (
+                      <tr
+                        key={ev.id}
+                        className={`hover:bg-surface/60 transition-colors ${
+                          isWarning ? 'bg-amber-50/30 dark:bg-amber-950/15' : ''
+                        }`}
+                      >
+                        <td className="py-2 px-3 whitespace-nowrap text-ink-muted">
+                          {new Date(ev.createdAt).toISOString().replace('T', ' ').slice(0, 19)}
+                        </td>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
+                              isWarning
+                                ? 'bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-900'
+                                : isSuccess
+                                  ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900'
+                                  : 'bg-muted/30 text-ink-muted border border-border'
+                            }`}
+                          >
+                            {ev.eventType}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 whitespace-nowrap text-ink">
+                          <span>{ip}</span>
+                          {device && (
+                            <span className="text-ink-muted text-[10px] ml-1.5">({device})</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-ink-muted max-w-md truncate">
+                          {Array.isArray(meta.reasons) ? (
+                            <span className="text-amber-800 dark:text-amber-300 font-sans text-xs">
+                              {(meta.reasons as string[]).join('; ')}
+                            </span>
+                          ) : typeof meta.reason === 'string' ? (
+                            <span className="text-ink font-sans text-xs">{meta.reason}</span>
+                          ) : (
+                            <span className="text-ink-muted text-[10px]">
+                              {JSON.stringify(meta)}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            <div className="p-3 border-t border-border flex items-center justify-between text-xs font-sans bg-surface/50">
+              <span className="text-[11px] text-ink-muted font-mono">
+                Showing {auditPage * auditLimit + 1}–
+                {Math.min((auditPage + 1) * auditLimit, auditData.total)} of {auditData.total}{' '}
+                events
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={auditPage === 0}
+                  onClick={() => setAuditPage((p) => Math.max(0, p - 1))}
+                  className="text-xs h-7 px-2"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 mr-0.5" />
+                  Previous
+                </Button>
+                <span className="px-2 font-mono text-[11px] text-ink-muted">
+                  Page {auditPage + 1} of {Math.max(1, Math.ceil(auditData.total / auditLimit))}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={(auditPage + 1) * auditLimit >= auditData.total}
+                  onClick={() => setAuditPage((p) => p + 1)}
+                  className="text-xs h-7 px-2"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>

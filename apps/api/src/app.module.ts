@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { AttachmentsModule } from './attachments/attachments.module.js';
+import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BackupsModule } from './backups/backups.module.js';
 import { MemoirThrottlerGuard } from './common/throttler/throttler.guard.js';
@@ -55,6 +56,7 @@ import { VaultModule } from './vault/vault.module.js';
     StorageModule,
     AttachmentsModule,
     BackupsModule,
+    AuditModule,
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
@@ -62,6 +64,7 @@ import { VaultModule } from './vault/vault.module.js';
           paths: [
             'req.headers.authorization',
             'req.headers.cookie',
+            'req.headers["x-csrf-token"]',
             'res.headers["set-cookie"]',
             '*.password',
             '*.currentPassword',
@@ -72,11 +75,18 @@ import { VaultModule } from './vault/vault.module.js';
             '*.totpCode',
             '*.totpSecret',
             '*.backupCode',
+            '*.backupCodes',
             '*.recoveryKey',
+            '*.recoveryKeyFingerprint',
             '*.ciphertext',
             '*.wrappedDek',
             '*.wrappedFileKey',
             '*.encryptedMeta',
+            '*.titleCiphertext',
+            '*.bodyCiphertext',
+            '*.tagsCiphertext',
+            '*.moodCiphertext',
+            '*.attachmentMetaCiphertext',
           ],
           censor: '[REDACTED_SECRET]',
         },
