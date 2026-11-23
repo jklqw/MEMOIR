@@ -1,0 +1,51 @@
+:root {
+  /* Archival Paper & Ink (Light Mode - Default) */
+  --color-canvas: #faf8f5;
+  --color-surface: #f2efe9;
+  --color-surface-hover: #ebe7df;
+  --color-border: #e4dfd6;
+  --color-border-subtle: #ede9e1;
+  --color-ink: #1c1b19;
+  --color-ink-muted: #6b6862;
+  --color-ink-subtle: #8f8b83;
+
+  --color-accent: #2d4f43;
+  --color-accent-hover: #223d34;
+  --color-accent-subtle: #e2ece8;
+  --color-accent-ink: #faf8f5;
+
+  --color-destructive: #a65d47;
+  --color-destructive-hover: #8a4b37;
+  --color-destructive-subtle: #f6ede9;
+
+  --color-ochre: #b3833a;
+  --color-ochre-subtle: #f8f3e9;
+
+  --font-serif: 'Newsreader', Georgia, Cambria, serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+.dark {
+  /* Obsidian Ink (Dark Mode) */
+  --color-canvas: #141413;
+  --color-surface: #1c1b1a;
+  --color-surface-hover: #262422;
+  --color-border: #2b2926;
+  --color-border-subtle: #22201d;
+  --color-ink: #ece9e2;
+  --color-ink-muted: #9a968e;
+  --color-ink-subtle: #68655f;
+
+  --color-accent: #6e9e8b;
+  --color-accent-hover: #83b3a0;
+  --color-accent-subtle: #1c2b25;
+  --color-accent-ink: #141413;
+
+  --color-destructive: #d97757;
+  --color-destructive-hover: #e28c6e;
+  --color-destructive-subtle: #2c1b16;
+
+  --color-ochre: #d4a359;
+  --color-ochre-subtle: #2b2215;
+}
