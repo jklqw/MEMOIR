@@ -21,7 +21,7 @@ COPY apps/web ./apps/web
 RUN pnpm --filter @memoir/web build
 
 # Stage 2: Hardened Nginx Reverse Proxy
-FROM nginx:1.27-alpine AS runner
+FROM nginx:1.29-alpine AS runner
 
 RUN apk add --no-cache openssl wget
 
