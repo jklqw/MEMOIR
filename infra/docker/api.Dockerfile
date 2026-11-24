@@ -1,6 +1,6 @@
 # Multi-stage non-root hardened Dockerfile for Memoir API
 # Stage 1: Build & Prune
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 make g++ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@10.34.9 --activate
@@ -29,7 +29,7 @@ RUN pnpm --filter @memoir/crypto run build
 RUN pnpm --filter @memoir/api run build
 
 # Stage 2: Hardened Non-Root Minimal Runtime
-FROM node:22-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates wget dumb-init && rm -rf /var/lib/apt/lists/*
 

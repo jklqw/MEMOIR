@@ -1,6 +1,6 @@
 # Multi-stage non-root hardened Dockerfile for Memoir Web (Vite + Nginx)
 # Stage 1: Build Static Assets
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.34.9 --activate
 
