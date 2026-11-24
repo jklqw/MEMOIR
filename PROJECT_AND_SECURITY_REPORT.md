@@ -545,7 +545,45 @@ Operational metadata visible to the server for synchronization:
   - `pnpm lint` -> PASS (0 errors, 14 allowed warnings).
   - `pnpm --filter @memoir/web build` -> PASS in 7.61s (0 errors).
 - **Atomic Commit Ledger:**
-  - _(current)_ — `feat(offline): implement encrypted-only IndexedDB cache and conflict-safe offline sync queue`
+  - `4e954da` — `feat(offline): implement encrypted-only IndexedDB cache and conflict-safe offline sync queue`
+
+#### Milestone 7.3: Client-Side Mood Insights, Time Capsules & Private Anniversary Reminders (Commit 43)
+
+- **Objective:** Deliver differentiated, privacy-preserving personal reflection features: 100% client-side mood patterns and streak metrics via Recharts with an Archival palette, server-withheld Time Capsules enforcing HTTP 423 Locked, and private "On This Day" anniversary reminders with an explicit zero-content notification disclosure.
+- **Implementation Summary:**
+  - Installed and configured `recharts` in `@memoir/web`.
+  - Authored `apps/web/src/services/insightsService.ts` for RAM-only reflective calculations:
+    - In-memory writing streak calculation (handles multiple entries per day and gap resets).
+    - Word counter across decrypted memory bodies.
+    - Mood distribution percentages with Archival color mapping (Sage, Ochre, Slate, Terracotta, Rose, Neutral Slate).
+    - Tag frequencies and day-of-week writing rhythms.
+    - "On This Day" anniversary matching (finds reflections written on today's month and day in previous years, excluding locked capsules and current-year entries).
+  - Authored `apps/web/src/pages/InsightsPage.tsx`:
+    - Responsive charts (mood horizontal bar chart, weekday rhythm bar chart) styled with Archival tokens.
+    - Key metric cards (Total Entries, Words Written, Current Streak, Longest Streak).
+    - Top private tags cloud.
+    - Prominent mandatory non-diagnostic notice: "Personal Insights are computed 100% in your browser for personal reflection only and do not constitute clinical or psychological diagnostic advice."
+  - Updated `TimelinePage.tsx`:
+    - Integrated "On This Day" private anniversary card at the top of the timeline feed with previews and deep navigation.
+    - Dedicated `/capsules` route filter with specialized archival header.
+    - Sealed time capsules marked with lock icon and unlock date.
+  - Updated `apps/api/src/memories/memories.controller.ts`:
+    - Enforced HTTP `423 Locked` on `GET /api/v1/memories/:id` when `isLockedTimeCapsule` is true (`Date.now() < unlockAt`).
+    - Discloses: "This Time Capsule is sealed until {unlockAt}. Note: Application-enforced feature, not a cryptographic time-lock."
+    - Automatically unlocks and serves full ciphertext and nonce once `unlockAt` has passed.
+  - Updated `SettingsPage.tsx`: added "Private Reflection & Anniversary Reminders" section with an honest zero-content notification policy disclosure.
+  - Authored automated tests in `apps/api/test/time-capsules.spec.ts` (4 tests) and `apps/web/test/insights.spec.ts` (6 tests) verifying all features and cryptographic invariants.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/time-capsules.spec.ts` -> 4 tests passed (100%).
+  - `pnpm --filter @memoir/web test test/insights.spec.ts` -> 6 tests passed (100%).
+  - `pnpm --filter @memoir/web test` -> 36 tests passed across 7 test suites (100%).
+  - `pnpm --filter @memoir/api test` -> 169 tests passed across 25 test suites (100%).
+  - `pnpm typecheck` -> PASS across all 4 workspace packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors, 14 allowed warnings).
+  - `pnpm --filter @memoir/web build` -> PASS in 16.30s (0 errors).
+  - `node scripts/scan-secrets.mjs` -> PASS (scanned 217 tracked files, 0 secrets detected).
+- **Atomic Commit Ledger:**
+  - _(current)_ — `feat(features): add client-side Mood Insights, Time Capsules, and private Anniversary Reminders`
 
 ---
 
@@ -738,17 +776,18 @@ The Memoir cryptography engine is implemented entirely in `packages/crypto` and 
 - Health probes active at `/api/v1/health` with active DB and Redis ping verification.
 - Complete test suites passing across all layers:
   - `@memoir/crypto`: 13 core invariant tests passing (100%).
-  - `@memoir/api`: 165 integration and security regression tests across 24 test suites passing (100%).
-  - `@memoir/web`: 30 frontend, accessibility, offline sync, and edge-state tests across 6 test suites passing (100%).
-- Web client builds deterministically with 100% self-hosted typography and zero external CDNs in 7.61s.
+  - `@memoir/api`: 169 integration and security regression tests across 25 test suites passing (100%).
+  - `@memoir/web`: 36 frontend, accessibility, offline sync, and insights tests across 7 test suites passing (100%).
+- Web client builds deterministically with 100% self-hosted typography and zero external CDNs in 16.30s.
 
 ---
 
 ## 15. Final Engineering Assessment
 
-Phase 6 Application Security Hardening is 100% complete across all 8 dedicated security controls. Phase 7 (Accessibility, Resilient Offline Mode & Differentiating Features) is actively progressing:
+Phase 6 Application Security Hardening and Phase 7 Differentiating Features & Resilient UX are both 100% complete across all milestones:
 
 - **WCAG 2.2 AA Accessibility & Resilient Edge States (Commit 41):** Verified strict $\ge 7.0:1$ and $\ge 4.5:1$ contrast ratios, visible `:focus-visible` rings, `prefers-reduced-motion` compliance, accessible Skip-to-content landmark jumping, Dialog focus trap with focus restoration, Archival ErrorBoundary, Loading skeletons, and `Cmd/Ctrl+K` Command Palette.
 - **Deliberate Account Deletion (Commit 41):** Re-authentication password verification, explicit `"DELETE MY ACCOUNT"` confirmation, cascading PostgreSQL database wipe, physical disk/S3 file purge, session cookie invalidation, and honest 30-day disaster recovery backup retention disclosure verified with dedicated automated tests.
 - **Encrypted-Only IndexedDB Cache & Offline Sync Queue (Commit 42):** Implemented client-side offline store strictly enforcing the Zero-Knowledge Invariant (encrypted ciphertext envelopes only; verified canary plaintext never touches IndexedDB). Seamless offline fallback with volatile RAM decryption, optimistic mutation queuing, and automatic online sync queue flushing with conflict resolution.
-- **Upcoming Milestone:** Client-side Mood Insights, Time Capsules & private Anniversary Reminders (Commit 43).
+- **Client-Side Mood Insights, Time Capsules & Private Anniversaries (Commit 43):** Delivered 100% RAM-only reflective insights (horizontal mood breakdown, weekday rhythm, streaks, word counter) using Recharts with Archival palette; server-side Time Capsule withholding enforcing HTTP `423 Locked`; private "On This Day" anniversary matching in RAM; and honest zero-content notification disclosure.
+- **Upcoming Milestone:** Phase 8 Production Hardening, Container Hardening, CI/CD & Final Release Documentation (Commits 44–46).

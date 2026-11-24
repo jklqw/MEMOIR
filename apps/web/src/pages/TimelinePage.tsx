@@ -9,6 +9,7 @@ import {
   PenLine,
   Pin,
   Search,
+  Sparkles,
   Tag,
   Unlock,
   X,
@@ -20,6 +21,7 @@ import { Button } from '../components/ui/Button.js';
 import { Input } from '../components/ui/Input.js';
 import { VaultUnlockModal } from '../components/vault/VaultUnlockModal.js';
 import { useMemoriesList } from '../hooks/useMemories.js';
+import { getAnniversaryMemories } from '../services/insightsService.js';
 import { useVaultStore } from '../stores/vaultStore.js';
 
 export function TimelinePage() {
@@ -40,6 +42,12 @@ export function TimelinePage() {
   const { data: memories = [], isLoading } = useMemoriesList({
     includeArchived,
   });
+
+  // 100% Client-Side Private Anniversary Memories ("On This Day")
+  const anniversaryMemories = useMemo(() => {
+    if (!isUnlocked) return [];
+    return getAnniversaryMemories(memories);
+  }, [memories, isUnlocked]);
 
   // Extract all unique tags and moods across all decrypted memories for filtering
   const { allTags, allMoods } = useMemo(() => {
@@ -163,6 +171,57 @@ export function TimelinePage() {
             <Unlock className="w-3.5 h-3.5 mr-1" />
             Unlock
           </Button>
+        </div>
+      )}
+
+      {/* On This Day (Private Client-Side Anniversary Card) */}
+      {anniversaryMemories.length > 0 && (
+        <div
+          role="region"
+          aria-label="On This Day Memories"
+          className="p-4 rounded-lg bg-surface border border-accent/40 space-y-3 shadow-xs"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-accent stroke-[1.5]" />
+              <h3 className="font-serif text-sm font-semibold text-ink">
+                On This Day ({anniversaryMemories.length === 1 ? '1 memory' : `${anniversaryMemories.length} memories`})
+              </h3>
+            </div>
+            <span className="text-[10px] font-mono text-ink-subtle">
+              Computed 100% locally in RAM
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {anniversaryMemories.map((annivMem) => {
+              const yearsAgo =
+                new Date().getFullYear() - new Date(annivMem.entryDate).getFullYear();
+              return (
+                <div
+                  key={annivMem.id}
+                  onClick={() => setSelectedMemory(annivMem)}
+                  className="p-3 rounded-md bg-canvas border border-border/80 hover:border-accent/50 cursor-pointer transition-colors space-y-1"
+                >
+                  <div className="flex items-center justify-between text-[11px] text-ink-muted">
+                    <span className="font-mono text-accent font-medium">
+                      {yearsAgo} {yearsAgo === 1 ? 'year' : 'years'} ago (
+                      {new Date(annivMem.entryDate).getFullYear()})
+                    </span>
+                    {annivMem.mood && (
+                      <span className="capitalize">{annivMem.mood}</span>
+                    )}
+                  </div>
+                  <h4 className="font-serif text-sm font-medium text-ink truncate">
+                    {annivMem.title || 'Untitled Memory'}
+                  </h4>
+                  <p className="text-xs text-ink-muted line-clamp-2 leading-relaxed">
+                    {annivMem.bodyMarkdown || 'No body text.'}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

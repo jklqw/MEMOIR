@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Bell,
   CheckCircle2,
   Download,
   FileCheck,
@@ -57,6 +58,24 @@ export function SettingsPage() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<BackupRestoreResult | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  // Reminder Preferences state (client-side preference storage)
+  const [anniversaryRemindersEnabled, setAnniversaryRemindersEnabled] = useState(() => {
+    return localStorage.getItem('memoir_pref_anniv_reminders') !== 'false';
+  });
+  const [dailyReflectionRemindersEnabled, setDailyReflectionRemindersEnabled] = useState(() => {
+    return localStorage.getItem('memoir_pref_daily_reminders') === 'true';
+  });
+
+  const handleToggleAnniv = (enabled: boolean) => {
+    setAnniversaryRemindersEnabled(enabled);
+    localStorage.setItem('memoir_pref_anniv_reminders', String(enabled));
+  };
+
+  const handleToggleDaily = (enabled: boolean) => {
+    setDailyReflectionRemindersEnabled(enabled);
+    localStorage.setItem('memoir_pref_daily_reminders', String(enabled));
+  };
 
   // History state
   const [history, setHistory] = useState<BackupHistoryItem[]>([]);
@@ -497,7 +516,59 @@ export function SettingsPage() {
         </Button>
       </div>
 
-      {/* 4. Danger Zone */}
+      {/* 4. Private Reflection & Anniversary Reminders */}
+      <div className="p-5 bg-surface border border-border rounded-lg space-y-4">
+        <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
+          <Bell className="w-4 h-4 text-accent stroke-[1.5]" />
+          <span>Private Reflection &amp; Anniversary Reminders</span>
+        </h2>
+        <div className="p-3.5 bg-canvas border border-border rounded-md text-xs text-ink-muted space-y-1.5">
+          <p className="font-medium text-ink">Zero-Content Reminder Policy</p>
+          <p className="leading-relaxed text-[11px]">
+            Memoir reminder notifications contain <strong>zero</strong> memory titles, moods, tags,
+            or diary prose. Notifications are limited strictly to generic prompts (e.g., &ldquo;You
+            have memories from previous years to revisit in your vault today.&rdquo;) because the server
+            possesses no cryptographic keys to read your archive.
+          </p>
+        </div>
+
+        <div className="space-y-3 pt-1">
+          <label className="flex items-start gap-2.5 cursor-pointer text-xs select-none">
+            <input
+              type="checkbox"
+              checked={anniversaryRemindersEnabled}
+              onChange={(e) => handleToggleAnniv(e.target.checked)}
+              className="mt-0.5 rounded border-border text-accent focus:ring-accent"
+            />
+            <div>
+              <span className="font-medium text-ink block">
+                &ldquo;On This Day&rdquo; Anniversary Highlights
+              </span>
+              <span className="text-[11px] text-ink-muted">
+                Highlights reflections written on today&rsquo;s date in previous years (100% computed
+                in browser RAM).
+              </span>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer text-xs select-none">
+            <input
+              type="checkbox"
+              checked={dailyReflectionRemindersEnabled}
+              onChange={(e) => handleToggleDaily(e.target.checked)}
+              className="mt-0.5 rounded border-border text-accent focus:ring-accent"
+            />
+            <div>
+              <span className="font-medium text-ink block">Daily Reflection Prompt</span>
+              <span className="text-[11px] text-ink-muted">
+                Quiet daily reminder to reflect and journal. Contains zero personal user data.
+              </span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      {/* 5. Danger Zone */}
       <div className="p-5 bg-surface border border-destructive/20 rounded-lg space-y-4">
         <h2 className="text-sm font-semibold text-destructive flex items-center gap-2">
           <Trash2 className="w-4 h-4 stroke-[1.5]" />

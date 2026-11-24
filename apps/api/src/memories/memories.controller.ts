@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpException,
   HttpStatus,
   Param,
   ParseUUIDPipe,
@@ -66,8 +67,20 @@ export class MemoriesController {
   })
   @ApiResponse({ status: HttpStatus.OK, description: 'Encrypted memory returned.' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Memory not found or unauthorized.' })
+  @ApiResponse({ status: HttpStatus.LOCKED, description: 'Time capsule sealed until unlock date.' })
   async findOne(@CurrentUser() user: User, @Param('id', new ParseUUIDPipe()) id: string) {
     const memory = await this.memoriesService.findOne(user.id, id);
+    if (memory.isLockedTimeCapsule) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.LOCKED,
+          error: 'Locked',
+          message: `This Time Capsule is sealed until ${memory.unlockAt?.toISOString() || 'the specified unlock date'}. Note: Application-enforced feature, not a cryptographic time-lock.`,
+          unlockAt: memory.unlockAt?.toISOString() || null,
+        },
+        HttpStatus.LOCKED,
+      );
+    }
     return {
       success: true,
       data: memory,
