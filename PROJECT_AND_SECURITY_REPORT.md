@@ -583,7 +583,31 @@ Operational metadata visible to the server for synchronization:
   - `pnpm --filter @memoir/web build` -> PASS in 16.30s (0 errors).
   - `node scripts/scan-secrets.mjs` -> PASS (scanned 217 tracked files, 0 secrets detected).
 - **Atomic Commit Ledger:**
-  - _(current)_ — `feat(features): add client-side Mood Insights, Time Capsules, and private Anniversary Reminders`
+  - `1782b2e` — `feat(features): add client-side Mood Insights, Time Capsules, and private Anniversary Reminders`
+
+### Phase 8: Production Hardening, CI/CD & Final Release Documentation
+
+#### Milestone 8.1: Hardened Non-Root Dockerfiles, Reverse Proxy TLS Config & Production Compose (Commit 44)
+
+- **Objective:** Containerize Memoir for zero-trust production deployments with multi-stage non-root runtime environments, immutable read-only assets, TLS 1.3 reverse proxying, and strict database network isolation (zero public host port exposure for PostgreSQL and Redis).
+- **Implementation Summary:**
+  - Authored `infra/docker/api.Dockerfile`: multi-stage build (`node:22-bookworm-slim`), unprivileged user `memoir` (UID 10001), process supervisor `dumb-init`, isolated `/app/storage/uploads` volume, and automated `HEALTHCHECK` probing `/api/v1/health`.
+  - Authored `infra/docker/web.Dockerfile`: multi-stage build, unprivileged Nginx (`nginx:1.27-alpine`), read-only static files (`chmod -R 555 /usr/share/nginx/html`), fallback self-signed TLS certificates for `memoir.local`, and automated `HEALTHCHECK`.
+  - Configured `infra/proxy/memoir.conf`: enforces TLS 1.3 / hardened 1.2, HTTP-to-HTTPS 301 redirection, strict security headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy), 1-year immutable caching for hashed static assets, and reverse proxying to `http://api:4000`.
+  - Created `docker-compose.prod.yml`:
+    - Strict network segmentation: `internal-net` configured with `internal: true` (zero external egress, zero public port exposure).
+    - `postgres` and `redis` attached exclusively to `internal-net` with `expose: 5432` and `expose: 6379` (zero host `ports:` published).
+    - `security_opt: [no-new-privileges:true]` enforced across all 4 production containers.
+    - Health-dependent startup sequence (`depends_on: { service_healthy }`).
+  - Authored automated test suite `apps/api/test/docker-hardening.spec.ts` (4 tests) verifying multi-stage builds, non-root users, healthchecks, network isolation, zero-port exposure, and Nginx TLS 1.3 parity.
+- **Verification Commands & Results:**
+  - `pnpm --filter @memoir/api test test/docker-hardening.spec.ts` -> 4 tests passed (100%).
+  - `docker compose -f docker-compose.prod.yml config` -> Validated successfully (exit code 0).
+  - `pnpm typecheck` -> PASS across all 4 workspace packages (0 errors).
+  - `pnpm lint` -> PASS (0 errors, 14 allowed warnings).
+  - `node scripts/scan-secrets.mjs` -> PASS (scanned 220 tracked files, 0 secrets detected).
+- **Atomic Commit Ledger:**
+  - _(current)_ — `build(docker): add hardened non-root Dockerfiles, reverse proxy TLS config, and production compose`
 
 ---
 
