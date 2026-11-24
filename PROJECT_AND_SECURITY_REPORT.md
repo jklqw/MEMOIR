@@ -607,7 +607,26 @@ Operational metadata visible to the server for synchronization:
   - `pnpm lint` -> PASS (0 errors, 14 allowed warnings).
   - `node scripts/scan-secrets.mjs` -> PASS (scanned 220 tracked files, 0 secrets detected).
 - **Atomic Commit Ledger:**
-  - _(current)_ — `build(docker): add hardened non-root Dockerfiles, reverse proxy TLS config, and production compose`
+  - `69f45bc` — `build(docker): add hardened non-root Dockerfiles, reverse proxy TLS config, and production compose`
+
+#### Milestone 8.2: Full GitHub Actions CI Pipeline & Dependabot Configuration (Commit 45)
+
+- **Objective:** Establish automated continuous integration pipelines and automated dependency security scans, enforcing code quality, cryptographic invariants, backend integration, ephemeral database testing, secret scanning, and Dependabot updates.
+- **Implementation Summary:**
+  - Configured `.github/workflows/ci.yml` running on push and pull requests targeting `main`:
+    - `code-quality`: Executes Prettier style checks (`pnpm format:check`), ESLint static analysis (`pnpm lint`), and strict TypeScript typechecking (`pnpm typecheck`).
+    - `crypto-and-frontend`: Tests cryptographic invariant test suite (`pnpm --filter @memoir/crypto test`), frontend unit/offline-sync/insights tests (`pnpm --filter @memoir/web test`), and builds the production frontend bundle (`pnpm --filter @memoir/web build`).
+    - `backend-integration`: Spins up ephemeral PostgreSQL 16 and Redis 7 services with healthchecks, runs database migrations (`prisma migrate deploy`), executes API integration tests (`pnpm --filter @memoir/api test`), and runs comprehensive security regression suite (`pnpm test:security`).
+    - `security-scan`: Scans for secrets with Gitleaks action (`gitleaks-action@v2`) and Memoir local secret scanner (`scripts/scan-secrets.mjs`), with high-severity dependency vulnerability audit (`pnpm audit`).
+  - Configured `.github/dependabot.yml`:
+    - Weekly dependency vulnerability scanning and PR management across `npm` (with version groupings for ESLint/Prettier, React ecosystem, and NestJS ecosystem), `github-actions`, and `docker` (`/infra/docker`).
+- **Verification Commands & Results:**
+  - `pnpm format:check` -> PASS (All matched files use Prettier code style).
+  - `pnpm lint` -> PASS (0 errors, 14 allowed warnings).
+  - `pnpm typecheck` -> PASS across all 4 workspace packages (0 errors).
+  - `node scripts/scan-secrets.mjs` -> PASS (scanned 224 tracked files, 0 secrets detected).
+- **Atomic Commit Ledger:**
+  - _(pending commit)_ — `ci(github): configure full GitHub Actions CI pipeline and Dependabot`
 
 ---
 

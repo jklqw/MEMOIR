@@ -1,0 +1,51 @@
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '04:00'
+      timezone: 'UTC'
+    open-pull-requests-limit: 10
+    labels:
+      - 'dependencies'
+      - 'security'
+    groups:
+      lint-and-format:
+        patterns:
+          - 'eslint*'
+          - 'prettier*'
+          - '@eslint*'
+          - 'typescript-eslint'
+      react-ecosystem:
+        patterns:
+          - 'react*'
+          - '@types/react*'
+      nestjs-ecosystem:
+        patterns:
+          - '@nestjs*'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '04:00'
+      timezone: 'UTC'
+    open-pull-requests-limit: 10
+    labels:
+      - 'ci'
+      - 'dependencies'
+
+  - package-ecosystem: 'docker'
+    directory: '/infra/docker'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '04:00'
+      timezone: 'UTC'
+    open-pull-requests-limit: 5
+    labels:
+      - 'docker'
+      - 'dependencies'

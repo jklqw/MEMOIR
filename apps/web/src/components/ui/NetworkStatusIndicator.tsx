@@ -99,9 +99,7 @@ export function NetworkStatusIndicator() {
         className="sticky top-0 z-50 w-full bg-accent-subtle border-b border-accent/20 px-4 py-1.5 text-accent flex items-center justify-center gap-2 text-xs font-mono animate-in fade-in duration-150"
       >
         <CloudUpload className="w-3.5 h-3.5 animate-bounce" aria-hidden="true" />
-        <span>
-          Syncing {syncState.pendingCount} encrypted change(s) to server...
-        </span>
+        <span>Syncing {syncState.pendingCount} encrypted change(s) to server...</span>
       </aside>
     );
   }

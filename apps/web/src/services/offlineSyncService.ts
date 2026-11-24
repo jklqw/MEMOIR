@@ -140,7 +140,9 @@ class OfflineSyncService {
         // Optimistic conflict detection:
         // Try fetching server version first to verify no collision
         try {
-          const serverCurrent = await apiHelper.get<MemoryItemResponse>(`memories/${item.memoryId}`);
+          const serverCurrent = await apiHelper.get<MemoryItemResponse>(
+            `memories/${item.memoryId}`,
+          );
           const serverUpdatedAt = new Date(serverCurrent.updatedAt).getTime();
 
           // If server was updated strictly after the client queued this change,

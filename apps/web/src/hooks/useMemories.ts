@@ -56,7 +56,6 @@ export function useMemoriesList(options?: { includeArchived?: boolean; entryDate
         }));
       }
 
-
       // Concurrently decrypt all memory envelopes locally in RAM
       const decrypted = await Promise.all(
         items.map(async (item) => {
@@ -243,7 +242,6 @@ export function useDeleteMemory() {
     },
   });
 }
-
 
 export function useTogglePin() {
   const queryClient = useQueryClient();

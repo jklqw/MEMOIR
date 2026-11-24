@@ -98,7 +98,9 @@ describe('Encrypted-Only IndexedDB Cache & Resilient Offline Sync Queue', () => 
 
     // Item deletion
     await offlineCacheService.removeCachedEncryptedMemory(dummyEncryptedMemory1.id);
-    const afterDelete = await offlineCacheService.getCachedEncryptedMemory(dummyEncryptedMemory1.id);
+    const afterDelete = await offlineCacheService.getCachedEncryptedMemory(
+      dummyEncryptedMemory1.id,
+    );
     expect(afterDelete).toBeUndefined();
   });
 
@@ -203,8 +205,14 @@ describe('Encrypted-Only IndexedDB Cache & Resilient Offline Sync Queue', () => 
     expect(result.failed).toBe(0);
 
     // Verify API calls
-    expect(mockApi.post).toHaveBeenCalledWith('memories', expect.objectContaining({ ciphertext: 'create-cipher' }));
-    expect(mockApi.patch).toHaveBeenCalledWith('memories/mem-uuid-update', expect.objectContaining({ ciphertext: 'update-cipher' }));
+    expect(mockApi.post).toHaveBeenCalledWith(
+      'memories',
+      expect.objectContaining({ ciphertext: 'create-cipher' }),
+    );
+    expect(mockApi.patch).toHaveBeenCalledWith(
+      'memories/mem-uuid-update',
+      expect.objectContaining({ ciphertext: 'update-cipher' }),
+    );
     expect(mockApi.delete).toHaveBeenCalledWith('memories/mem-uuid-delete');
 
     // Queue should now be empty
@@ -214,7 +222,8 @@ describe('Encrypted-Only IndexedDB Cache & Resilient Offline Sync Queue', () => 
     expect(await offlineCacheService.getCachedEncryptedMemory('mem-uuid-delete')).toBeUndefined();
 
     // Created item present in local cache under server assigned UUID
-    const cachedCreated = await offlineCacheService.getCachedEncryptedMemory('server-assigned-uuid');
+    const cachedCreated =
+      await offlineCacheService.getCachedEncryptedMemory('server-assigned-uuid');
     expect(cachedCreated).toBeDefined();
     expect(cachedCreated?.ciphertext).toBe('create-cipher');
   });

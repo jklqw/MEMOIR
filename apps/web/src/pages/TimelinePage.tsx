@@ -185,7 +185,11 @@ export function TimelinePage() {
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-accent stroke-[1.5]" />
               <h3 className="font-serif text-sm font-semibold text-ink">
-                On This Day ({anniversaryMemories.length === 1 ? '1 memory' : `${anniversaryMemories.length} memories`})
+                On This Day (
+                {anniversaryMemories.length === 1
+                  ? '1 memory'
+                  : `${anniversaryMemories.length} memories`}
+                )
               </h3>
             </div>
             <span className="text-[10px] font-mono text-ink-subtle">
@@ -208,9 +212,7 @@ export function TimelinePage() {
                       {yearsAgo} {yearsAgo === 1 ? 'year' : 'years'} ago (
                       {new Date(annivMem.entryDate).getFullYear()})
                     </span>
-                    {annivMem.mood && (
-                      <span className="capitalize">{annivMem.mood}</span>
-                    )}
+                    {annivMem.mood && <span className="capitalize">{annivMem.mood}</span>}
                   </div>
                   <h4 className="font-serif text-sm font-medium text-ink truncate">
                     {annivMem.title || 'Untitled Memory'}

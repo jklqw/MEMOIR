@@ -57,14 +57,14 @@ describe('Production Hardening: Docker, Reverse Proxy & Network Isolation Verifi
     const postgresBlock = content.split('\n  redis:')[0] || '';
     expect(postgresBlock).toContain('internal-net');
     expect(postgresBlock).not.toContain('frontend-net');
-    expect(postgresBlock).toContain('expose:\n      - \'5432\'');
+    expect(postgresBlock).toContain("expose:\n      - '5432'");
     expect(postgresBlock).not.toMatch(/ports:\s*\n\s*-\s*['"]?5432:5432/); // Zero public host binding
 
     // Redis isolation
     const redisBlock = content.split('\n  api:')[0]?.split('\n  redis:')[1] || '';
     expect(redisBlock).toContain('internal-net');
     expect(redisBlock).not.toContain('frontend-net');
-    expect(redisBlock).toContain('expose:\n      - \'6379\'');
+    expect(redisBlock).toContain("expose:\n      - '6379'");
     expect(redisBlock).not.toMatch(/ports:\s*\n\s*-\s*['"]?6379:6379/); // Zero public host binding
 
     // no-new-privileges flag

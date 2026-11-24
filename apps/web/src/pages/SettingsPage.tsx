@@ -527,8 +527,8 @@ export function SettingsPage() {
           <p className="leading-relaxed text-[11px]">
             Memoir reminder notifications contain <strong>zero</strong> memory titles, moods, tags,
             or diary prose. Notifications are limited strictly to generic prompts (e.g., &ldquo;You
-            have memories from previous years to revisit in your vault today.&rdquo;) because the server
-            possesses no cryptographic keys to read your archive.
+            have memories from previous years to revisit in your vault today.&rdquo;) because the
+            server possesses no cryptographic keys to read your archive.
           </p>
         </div>
 
@@ -545,8 +545,8 @@ export function SettingsPage() {
                 &ldquo;On This Day&rdquo; Anniversary Highlights
               </span>
               <span className="text-[11px] text-ink-muted">
-                Highlights reflections written on today&rsquo;s date in previous years (100% computed
-                in browser RAM).
+                Highlights reflections written on today&rsquo;s date in previous years (100%
+                computed in browser RAM).
               </span>
             </div>
           </label>

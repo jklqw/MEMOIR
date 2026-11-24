@@ -1,25 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Award,
-  BookOpen,
-  Flame,
-  Info,
-  Lock,
-  PenTool,
-  Sparkles,
-  Tag,
-  Unlock,
-} from 'lucide-react';
-import {
-  Bar,
-  BarChart,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import { Award, BookOpen, Flame, Info, Lock, PenTool, Sparkles, Tag, Unlock } from 'lucide-react';
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '../components/ui/Button.js';
 import { EmptyState } from '../components/ui/EmptyState.js';
 import { useMemoriesList } from '../hooks/useMemories.js';
@@ -97,10 +79,10 @@ export function InsightsPage() {
       >
         <Info className="w-4 h-4 text-accent shrink-0 mt-0.5 stroke-[1.5]" />
         <p className="text-xs text-ink-muted leading-relaxed">
-          <strong className="text-ink font-medium">Reflective Notice:</strong> Personal Insights
-          are computed 100% in your browser for personal reflection only and do not constitute
-          clinical or psychological diagnostic advice. Memoir never interprets your thoughts or
-          sends raw content to machine-learning models.
+          <strong className="text-ink font-medium">Reflective Notice:</strong> Personal Insights are
+          computed 100% in your browser for personal reflection only and do not constitute clinical
+          or psychological diagnostic advice. Memoir never interprets your thoughts or sends raw
+          content to machine-learning models.
         </p>
       </div>
 
@@ -141,7 +123,8 @@ export function InsightsPage() {
                 {insights.totalWords.toLocaleString()}
               </p>
               <p className="text-[11px] text-ink-subtle">
-                ~{Math.round(insights.totalWords / Math.max(1, insights.totalMemories))} words / entry
+                ~{Math.round(insights.totalWords / Math.max(1, insights.totalMemories))} words /
+                entry
               </p>
             </div>
 
@@ -265,7 +248,9 @@ export function InsightsPage() {
             <div className="p-5 rounded-lg bg-surface border border-border space-y-4">
               <div>
                 <h2 className="text-sm font-semibold text-ink">Writing Rhythm</h2>
-                <p className="text-xs text-ink-muted">Frequency of writing across days of the week</p>
+                <p className="text-xs text-ink-muted">
+                  Frequency of writing across days of the week
+                </p>
               </div>
 
               <div className="h-56 w-full" style={{ minHeight: '224px' }}>
